@@ -274,19 +274,21 @@ class MachineLearningWireless:
     def equalize(self, estimated_channel, symbols, noise_process, equalizer='MMSE'):
         # TODO: what is the difference between a combiner and an equalizer?
         # Where does MRC fit into this?
+        # W is N_t x N_r
         
         G = self.G
-        noise_variance = self.noise_variance
+        noise_variance = self.noise_variance # note this should equal np.var(noise_process)
         N_r = self.N_r
         N_t = self.N_t
         
+        H = estimated_channel
+        HH = H.conj().T
+        
         if (equalizer == 'ZF'):
-            #W = 1 / np.sqrt(G) * np.matmul(np.linalg.pinv(np.matmul(estimated_channel.conj().T, estimated_channel)), estimated_channel.conj().T)
-            W = 1 / np.sqrt(G) * np.linalg.pinv(estimated_channel)
+            W = 1 / np.sqrt(G) * np.linalg.pinv(H) # fast short-hand notation
+            #W4 = np.matmul(HH, np.linalg.pinv(np.matmul(H, HH)))
         elif (equalizer == 'MMSE'):
-            # TODO: write the MMSE equalizer p409
-            signal_power = None # how is it different for different antenna streams?
-            W = None + noise_variance
+            W = 1 / np.sqrt(G) * np.matmul(HH, np.linalg.pinv(np.matmul(H, HH) + noise_variance * np.eye(N_r)))
         else:
             W = None
 
@@ -550,7 +552,7 @@ class MachineLearningWireless:
 ## Simulation parameters ###########
 noise_power = 1e-2 # in Watts
 N_t = 4
-N_r = 4
+N_r = 2
 N_symbols = 256
 N_pilot = 77 # for channel estimation
 seed = 0
@@ -580,7 +582,9 @@ for s in seeds:
         mlw._reset_random_state(seed=s)
         H_hat_ml = mlw.estimate_channel_learning(df, N_pilot, how='linear_regression')
         H_hat = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
-        W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, symbols=df, noise_process=n, equalizer='ZF')
+        W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, 
+                                          symbols=df, noise_process=n, 
+                                          equalizer='MMSE')
         average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
                             noise_process=df_equalized.filter(regex='v_'), dB=True)
         mse_LS.append(mlw.mse(H, H_hat))
