@@ -419,6 +419,12 @@ class MachineLearningWireless:
         return df
 
 
+    def compute_receive_bler(self, received_symbols, codeword_length):
+        # TODO:
+            # Convert detected symbols to their respective bits
+            # Apply CRC on codewords
+        return False
+
     def compute_receive_snr(self, signal_process, noise_process, dB=False):
         N_r = self.N_r
         

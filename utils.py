@@ -45,7 +45,8 @@ class Utils:
         
     def plotXY(self, x, y, xlabel, ylabel, logx=False, logy=False, title=None):
         fig = plt.figure(figsize=(8, 5))            
-            
+        
+        plt.plot(x, y, lw=1.5, c='black', marker='*', label=ylabel)
         plt.grid(which='both', linestyle='--')
         ax = fig.gca()    
         
