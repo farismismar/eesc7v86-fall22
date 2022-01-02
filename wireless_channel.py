@@ -603,7 +603,6 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
                           logy=True,
                           title=f'MSE vs Pilot ({N_symbols} symbols)')
 
-
 #######################################
 # Question: what is the BER
 df_quantized = mlw.quantize(df_equalized, b=np.inf)

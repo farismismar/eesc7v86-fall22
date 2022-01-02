@@ -142,7 +142,6 @@ class Utils:
             cmap = self.cmap
             
         fig = plt.figure(figsize=(8, 5))
-            
         ax = fig.gca()
         
         for data_type in df[category].unique():
