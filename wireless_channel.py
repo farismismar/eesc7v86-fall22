@@ -95,6 +95,8 @@ class MachineLearningWireless:
         constellation = constellation.round(precision)
         
         constellation.loc[:, 'm'] = constellation.loc[:, 'm'].astype(int)
+        constellation['bits'] = np.sign(constellation['I']).apply(lambda x: str(max(0, int(x)))) + \
+            np.sign(constellation['Q']).apply(lambda x: str(max(0, int(x))))
         
         return constellation, H
 
@@ -421,8 +423,9 @@ class MachineLearningWireless:
 
     def compute_receive_bler(self, received_symbols, codeword_length):
         # TODO:
-            # Convert detected symbols to their respective bits
+            # Convert detected symbols to their respective bits per branch
             # Apply CRC on codewords
+            
         return False
 
     def compute_receive_snr(self, signal_process, noise_process, dB=False):
