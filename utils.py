@@ -12,8 +12,11 @@ import pandas as pd
 
 from scipy.ndimage import gaussian_filter
 
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+import pdb
 
 class Utils:
     def __init__(self, cmap=None, seed=None):
@@ -40,40 +43,53 @@ class Utils:
         self.low_threshold = None
     
         
-    def plotXY(self, x, y, xlabel, ylabel, title=None):
-        fig = plt.figure(figsize=(8, 5))
-
-        plt.plot(x, y, lw=1.5, c='black', marker='*')        
+    def plotXY(self, x, y, xlabel, ylabel, logx=False, logy=False, title=None):
+        fig = plt.figure(figsize=(8, 5))            
+            
         plt.grid(which='both', linestyle='--')
-        
         ax = fig.gca()    
-
+        
+        if logy == True:
+            plt.yscale('log')
+            ax.get_yaxis().get_major_formatter().labelOnlyBase = False
+        if logx == True:
+            plt.xscale('log')
+            ax.get_xaxis().get_major_formatter().labelOnlyBase = False
+        
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         if title is not None:
             plt.title(title)
+            
         plt.tight_layout()
         plt.show()
         plt.close(fig)
         
         
-    def plotXY_comparison(self, x, y1, y2, xlabel, y1label, y2label, title=None):
-        
+    def plotXY_comparison(self, x, y1, y2, xlabel, y1label, y2label, logx=False, logy=False, title=None):    
         fig = plt.figure(figsize=(8, 5))
+        ax = fig.add_subplot(111)
 
         plt.plot(x, y1, lw=1.5, c='black', marker='*', label=y1label)
         plt.plot(x, y2, lw=1.5, c='red', marker='*', label=y2label)
         plt.grid(which='both', linestyle='--')
         
-        ax = fig.gca()
-
-        ax.set_xlabel(xlabel)
-        
         plt.legend(bbox_to_anchor=(0.05, -0.02, 0.9, 1), bbox_transform=fig.transFigure, 
                    loc='lower center', ncol=2, mode="expand", borderaxespad=0.)
         
+        if logy == True:
+            ax.set_yscale('log')
+            ax.get_yaxis().get_major_formatter().labelOnlyBase = False
+            #ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        if logx == True:
+            ax.set_xscale('log')
+            ax.get_xaxis().get_major_formatter().labelOnlyBase = False
+            #ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
         if title is not None:
             plt.title(title)
+
+        ax.set_xlabel(xlabel)
         plt.tight_layout()
         plt.show()
         plt.close(fig)

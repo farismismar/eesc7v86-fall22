@@ -122,8 +122,8 @@ class MachineLearningWireless:
         noise_variance = self.noise_variance
 
         df = pd.DataFrame(columns=['m', 'x_I', 'x_Q', 'y_I', 'y_Q', 'n_I', 'n_Q'])
+        
         for sym in range(N_symbols):
-     
             df_N_t = constellation.sample(n=N_t, replace=True, random_state=np_random_state)
             
             m = df_N_t['m']
@@ -573,7 +573,7 @@ mse_LS = []
 mse_MachineLearning = []
 mse_npilots = []
 
-N_pilots = np.linspace(50,200,20).astype(int)
+N_pilots = np.linspace(50,250,10).astype(int)
 seeds = np.arange(15)
 for s in seeds:
     for N_pilot in N_pilots:
@@ -595,9 +595,10 @@ df_summary = df_summary.groupby('N_pilot').mean().reset_index()
 
 myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=df_summary['MSE_ML'], 
                           xlabel='Pilot size [syms]', y1label='LS estimation', 
-                          y2label='LinearReg estimation', title=f'MSE vs Pilot ({N_symbols} symbols)')
+                          y2label='LinearReg estimation', 
+                          logy=True,
+                          title=f'MSE vs Pilot ({N_symbols} symbols)')
 
-pdb.set_trace()
 
 #######################################
 # Question: what is the BER
