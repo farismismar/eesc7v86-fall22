@@ -26,17 +26,22 @@ class MachineLearningWireless:
     
         self.prefer_gpu = prefer_gpu
         
-        if random_state is None:
-            self.seed = np.random.mtrand._rand
-        else:
-            self.seed = random_state
-        
-        os.environ['PYTHONHASHSEED'] = str(self.seed)
-        random.seed(self.seed)
-        self.np_random_state = np.random.RandomState(self.seed)
-        
         self.H = None # Channel
         self.F = None # Precoder
+        
+        self._reset_random_state(random_state)
+        
+        
+    def _reset_random_state(self, seed):
+                
+        if seed is None:
+            self.seed = np.random.mtrand._rand
+        else:
+            self.seed = seed
+        
+        os.environ['PYTHONHASHSEED'] = str(self.seed)
+        random.seed(self.seed) # gives a DeprecationWarning
+        self.np_random_state = np.random.RandomState(self.seed)
         
     
     def create_channel(self, N_t, N_r, noise_variance=0, large_scale_gain=1, fading='Rayleigh', modulation='BPSK'):
@@ -566,20 +571,33 @@ df, X_true, n = mlw.wrangle_data(df)
 # Question: how does the LS and linear regression perform for a given pilot?
 mse_LS = []
 mse_MachineLearning = []
+mse_npilots = []
 
-N_pilots = np.linspace(5,256,10).astype(int)
-for N_pilot in N_pilots:
-    H_hat_ml = mlw.estimate_channel_learning(df, N_pilot, how='linear_regression')
-    H_hat = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
-    W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, symbols=df, noise_process=n, equalizer='ZF')
-    average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
-                        noise_process=df_equalized.filter(regex='v_'), dB=True)
-    mse_LS.append(mlw.mse(H, H_hat))
-    mse_MachineLearning.append(mlw.mse(H, H_hat_ml))
+N_pilots = np.linspace(50,200,20).astype(int)
+seeds = np.arange(15)
+for s in seeds:
+    for N_pilot in N_pilots:
+        mlw._reset_random_state(seed=s)
+        H_hat_ml = mlw.estimate_channel_learning(df, N_pilot, how='linear_regression')
+        H_hat = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
+        W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, symbols=df, noise_process=n, equalizer='ZF')
+        average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
+                            noise_process=df_equalized.filter(regex='v_'), dB=True)
+        mse_LS.append(mlw.mse(H, H_hat))
+        mse_MachineLearning.append(mlw.mse(H, H_hat_ml))
+        mse_npilots.append(N_pilot)
+        
+df_summary = pd.DataFrame(data={'N_pilot': mse_npilots,
+                                'MSE_LS': mse_LS,
+                                'MSE_ML': mse_MachineLearning})
 
-myUtils.plotXY_comparison(x=N_pilots, y1=mse_LS, y2=mse_MachineLearning, 
+df_summary = df_summary.groupby('N_pilot').mean().reset_index()
+
+myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=df_summary['MSE_ML'], 
                           xlabel='Pilot size [syms]', y1label='LS estimation', 
-                          y2label='LinearReg estimation', title='MSE')
+                          y2label='LinearReg estimation', title=f'MSE vs Pilot ({N_symbols} symbols)')
+
+pdb.set_trace()
 
 #######################################
 # Question: what is the BER
