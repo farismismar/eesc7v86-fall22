@@ -14,6 +14,21 @@ Symbol detection is performed through three different algorithms: 1) maximum lik
 
 Statistics reported are the channel estimation mean squared error, symbol error rate, bit error rate, and block error rate.
 
+## Citation
+
+If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following paper:
+
+`@misc{mlwirelesscomm,
+title={A Tutorial on Machine Learning in Wireless Networks},
+author={Mismar, F. B.},
+year={2022},
+eprint={220x.yyyy},
+archivePrefix={arXiv},
+primaryClass={cs.IT}
+}`
+
+
+
 ## Versioning
 
 | Version        | Date           | Description  |
