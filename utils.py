@@ -96,7 +96,8 @@ class Utils:
         plt.close(fig)
         
     
-    def plot_box(self, df, measure, category, cmap=None):
+    def plot_box(self, df, measure, category, title=None, cmap=None):
+        # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
             
@@ -107,7 +108,10 @@ class Utils:
         else:
             ax = sns.boxplot(x=category, y=measure, data=df, palette=dict(cmap))
         
-        plt.title(measure)
+        if title is None:
+            title = measure
+            
+        plt.title(title)
         plt.grid()
         
         filename = f'box_plot_{measure}.png'
@@ -116,7 +120,8 @@ class Utils:
         plt.close(fig)
         
     
-    def _plot_cdfs_kde(self, df, measure, category, cmap=None):
+    def _plot_cdfs_kde(self, df, measure, category, cmap=None, title=None):
+        # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
             
@@ -127,7 +132,10 @@ class Utils:
         else:
             sns.displot(df, x=measure, hue=category, kind='kde', palette=dict(cmap), cumulative=True, common_norm=False, common_grid=True)
             
-        plt.title(measure)
+        if title is None:
+            title = measure
+            
+        plt.title(title)
         plt.grid()
         
         plt.tight_layout()
@@ -138,7 +146,8 @@ class Utils:
         plt.close(fig)
         
         
-    def _plot_cdfs(self, df, measure, category, cmap=None, num_bins=200):
+    def _plot_cdfs(self, df, measure, category, cmap=None, title=None, num_bins=200):
+        # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
             
@@ -159,8 +168,11 @@ class Utils:
         
         ax.set_xlabel(measure)
         ax.set_ylabel('Probability')
-        
-        plt.title(measure)
+                
+        if title is None:
+            title = measure
+            
+        plt.title(title)
         plt.grid()
         plt.legend()
         plt.tight_layout()
@@ -170,14 +182,15 @@ class Utils:
         plt.close(fig)
         
         
-    def plot_cdfs(self, df, measure, category, cmap=None, is_kde=False, num_bins=200):
+    def plot_cdfs(self, df, measure, category, cmap=None, title=None, is_kde=False, num_bins=200):
         if is_kde:
-            self._plot_cdfs_kde(df, measure, category, cmap)
+            self._plot_cdfs_kde(df, measure, category, cmap, title)
         else:
-            self._plot_cdfs(df, measure, category, cmap, num_bins)
+            self._plot_cdfs(df, measure, category, cmap, title, num_bins)
             
         
-    def plot_pdfs(self, df, measure, category, cmap=None, num_bins=200):
+    def plot_pdfs(self, df, measure, category, cmap=None, title=None, num_bins=200):
+        # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
             
@@ -200,7 +213,10 @@ class Utils:
         ax.set_xlabel(measure)
         ax.set_ylabel('Density')
         
-        plt.title(measure)
+        if title is None:
+            title = measure
+            
+        plt.title(title)
         plt.grid()
         plt.legend()
         plt.tight_layout()
@@ -228,6 +244,7 @@ class Utils:
         plt.grid(True, ls='dashed')
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
+        
         if title is not None:
             plt.title(f'{title}')
         
