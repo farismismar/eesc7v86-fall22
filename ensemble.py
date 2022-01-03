@@ -13,14 +13,14 @@ from sklearn.model_selection import train_test_split, GridSearchCV, learning_cur
 from sklearn.utils import class_weight
 
 from sklearn.ensemble import RandomForestClassifier
-
+import xgboost as xgb
 import matplotlib.pyplot as plt
 
 import pdb
 import time
 
 class EnsembleClassifier:
-    def __init__(self, seed=None, prefer_gpu=True):
+    def __init__(self, seed=None, prefer_gpu=True, is_booster=True):
     
         # use_cuda = len(tf.config.list_physical_devices('GPU')) > 0 and prefer_gpu
         # self.device = "/gpu:0" if use_cuda else "/cpu:0"
@@ -33,6 +33,9 @@ class EnsembleClassifier:
         os.environ['PYTHONHASHSEED'] = str(self.seed)
         random.seed(self.seed)
         self.np_random_state = np.random.RandomState(self.seed)
+        
+        self.is_booster = is_booster
+        self.prefer_gpu = prefer_gpu
         
         plt.rcParams['font.family'] = "Arial"
         plt.rcParams['font.size'] = "14"
@@ -51,12 +54,22 @@ class EnsembleClassifier:
                                                   classes=np.unique(y_train),
                                                   y=y_train)
         class_weights = dict(enumerate(class_weights))
-                  
-        base_estimator = RandomForestClassifier(n_estimators=1000, n_jobs=-1, class_weight=class_weights, random_state=self.np_random_state)
-        hyperparameters = {'criterion': ['entropy', 'gini'],
-                           #'min_impurity_decrease': [0.1, 0.2],
-                  #'min_weight_fraction_leaf': [0.1, 0.3],
-                  'min_samples_split': [2, 10]}
+        
+        if self.is_booster == False:
+            base_estimator = RandomForestClassifier(n_estimators=1000, n_jobs=-1, class_weight=class_weights, random_state=self.np_random_state)
+            hyperparameters = {'criterion': ['entropy', 'gini'],
+                                #'min_impurity_decrease': [0.1, 0.2],
+                      #'min_weight_fraction_leaf': [0.1, 0.3],
+                      'min_samples_split': [2, 10]}
+        else:
+            tree_method = 'gpu_hist' if self.prefer_gpu else 'hist'
+            
+            base_estimator = xgb.XGBClassifier(tree_method=tree_method, seed=self.seed)
+            hyperparameters = {'reg_lambda': np.linspace(0,1,3),
+                               'reg_alpha': np.linspace(0,1,3),
+                               'colsample_bytree': [0,0.5,1]
+                               }
+        
         start_time = time.time()
         clf = GridSearchCV(base_estimator, param_grid=hyperparameters, 
                            cv=K_fold, n_jobs=-1, scoring='roc_auc_ovr_weighted', verbose=1)

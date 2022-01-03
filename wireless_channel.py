@@ -665,7 +665,7 @@ df_detection = mlw.detection(df=df_quantized, constellation=constellation,
                       how='max_likelihood')
 average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
                     noise_process=df_detection.filter(regex='v_'), dB=True)
-average_SER, _, average_BER, df_BERs = mlw.symbol_error(df_detection)
+average_SER, df_SERs, average_BER, df_BERs = mlw.symbol_error(df_detection)
 average_BLER, df_BLERs = mlw.block_error(df_detection, constellation, df_BERs, codeword_length=10)
 
 print('Average SNR post detection {} dB'.format(average_receive_SNR.values))
@@ -708,11 +708,16 @@ df_2.columns = ['x_hat', 'IQ']
 df = pd.concat([df_1, df_2], axis=0)
 myUtils.plot_cdfs(df, 'x_hat', 'IQ')
 
-# PDF of SINR and BLER
+#######################################
+# Question: what is the CDF of the SNR, SER, BER, and BLER like?
 df_receive_SNR = df_receive_SNR.melt()
-myUtils.plot_pdfs(df_receive_SNR, measure='value', category='variable')
+myUtils.plot_cdfs(df_receive_SNR, measure='value', category='variable')
+
+df_SERs = df_SERs.melt()
+myUtils.plot_cdfs(df_SERs, measure='value', category='variable')
+
+df_BERs = df_BERs.melt()
+myUtils.plot_cdfs(df_BERs, measure='value', category='variable')
 
 df_BLERs = df_BLERs.melt()
-myUtils.plot_pdfs(df_receive_SNR, measure='value', category='variable')
-
-
+myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
