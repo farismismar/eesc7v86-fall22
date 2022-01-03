@@ -123,7 +123,7 @@ class MachineLearningWireless:
         
         noise_variance = self.noise_variance
 
-        df = pd.DataFrame(columns=['m', 'x_I', 'x_Q', 'y_I', 'y_Q', 'n_I', 'n_Q'])
+        df = pd.DataFrame(columns=['m', 'x_I', 'x_Q', 'HFx_I', 'HFx_Q', 'y_I', 'y_Q', 'n_I', 'n_Q'])
         
         for sym in range(N_symbols):
             df_N_t = constellation.sample(n=N_t, replace=True, random_state=np_random_state)
@@ -155,11 +155,13 @@ class MachineLearningWireless:
             
             x_I = np.real(x)
             x_Q = np.imag(x)
+            HFx_I = np.real(normalized_HFx)
+            HFx_Q = np.imag(normalized_HFx)
             y_I = np.real(y)
             y_Q = np.imag(y)
             m = np.array(m)
             
-            to_append = pd.Series([m, x_I, x_Q, y_I, y_Q, n_I, n_Q], index=df.columns)
+            to_append = pd.Series([m, x_I, x_Q, HFx_I, HFx_Q, y_I, y_Q, n_I, n_Q], index=df.columns)
             df = df.append(to_append, ignore_index=True)
         
         return df
@@ -285,6 +287,7 @@ class MachineLearningWireless:
         
         H = estimated_channel
         HH = H.conj().T
+
         
         if (equalizer == 'ZF'):
             W = 1 / np.sqrt(G) * np.linalg.pinv(H) # fast short-hand notation
@@ -319,7 +322,7 @@ class MachineLearningWireless:
         
         df_enhanced_noise = pd.concat([df_1, df_2], axis=1)
         
-        # Now do the same thing for x_hat        
+        # Now do the same thing for R        
         # Can there be a better construct?
         df_symbols = pd.DataFrame()
         for stream in range(1, N_r + 1):
@@ -328,18 +331,18 @@ class MachineLearningWireless:
             y.columns = [f'y_{stream}']
             df_symbols = pd.concat([df_symbols, y], axis=1)
             
-        X_hat = [] 
+        R = [] 
         for idx, row in df_symbols.iterrows():
             y_i = row.values.reshape(N_r, 1)
-            # X_hat = W* x Y
-            x_hat_i = np.linalg.multi_dot([W, y_i])
-            X_hat.append(x_hat_i)
+            # R = W* x Y
+            r_i = np.linalg.multi_dot([W, y_i])
+            R.append(r_i)
     
-        df_1 = pd.DataFrame([list(np.real(x)) for x in X_hat])
+        df_1 = pd.DataFrame([list(np.real(x)) for x in R])
         df_1.columns = [f'r_I_{stream}' for stream in range(1, N_t + 1)]
         df_1 = df_1.applymap(lambda x: x[0])
         
-        df_2 = pd.DataFrame([list(np.imag(x)) for x in X_hat])
+        df_2 = pd.DataFrame([list(np.imag(x)) for x in R])
         df_2.columns = [f'r_Q_{stream}' for stream in range(1, N_t + 1)]
         df_2 = df_2.applymap(lambda x: x[0])
         
@@ -367,9 +370,8 @@ class MachineLearningWireless:
         return df
     
     
-    # This function provides coherent detection.
+    # This function provides coherent detection.  That is, we assume H is known.
     def detection(self, df, constellation, how='max_likelihood'):
-        
         N_r = self.N_r
         
         if how == 'max_likelihood': # maximum likelihood detection    
@@ -419,14 +421,7 @@ class MachineLearningWireless:
                 df[f'm_hat_{stream}'] = m_hat 
             
         return df
-
-
-    def compute_receive_bler(self, received_symbols, codeword_length):
-        # TODO:
-            # Convert detected symbols to their respective bits per branch
-            # Apply CRC on codewords
-            
-        return False
+    
 
     def compute_receive_snr(self, signal_process, noise_process, dB=False):
         N_r = self.N_r
@@ -434,14 +429,17 @@ class MachineLearningWireless:
         # Compute average SNR per receive branch N_r
         # before equalization
         df_SNRs = pd.DataFrame()
-        for stream in range(1, N_r + 1):               
+        for stream in range(1, N_r + 1):
+            # If y = HFx + n
+            # Then SNR = power of HFx / power of n
             sig = signal_process.filter(regex=f'_{stream}')
             noise = noise_process.filter(regex=f'_{stream}')
-            
+
             received_power = sig.iloc[:, 0] ** 2 + sig.iloc[:, 1] ** 2 # symbol power I/Q
             noise_power = noise.iloc[:, 0] ** 2 + noise.iloc[:, 1] ** 2 # symbol power I/Q
-
-            snr = received_power / noise_power
+            signal_power = received_power - noise_power
+            
+            snr = signal_power / noise_power
             df_SNR_j = pd.DataFrame(data={f'SNR_{stream}': snr}, index=received_power.index)
             df_SNRs = pd.concat([df_SNRs, df_SNR_j], axis=1)
         
@@ -461,6 +459,55 @@ class MachineLearningWireless:
         return MSE
     
 
+    def block_error(self, df, constellation, df_BERs, codeword_length):
+        # Convert detected symbols to their respective bits per branch
+        # Apply CRC on codewords
+        # Let CRC generator polynomial be x^3 + x + 1 = 1011
+        gen_poly = '1011'
+        len_poly = len(gen_poly)
+        
+        # LTE specifies polynomials in 36.212
+        modulation = self.modulation
+        bits = constellation[['m', 'bits']]
+        
+        df_BLERs = pd.DataFrame()
+        for stream in range(1, N_t + 1):
+            true_s = df[f'm_{stream}'].to_frame()
+            pred_s = df[f'm_hat_{stream}'].to_frame()
+           
+            true_bits_s = true_s.merge(bits, how='left', left_on=f'm_{stream}', right_on='m')
+            pred_bits_s = pred_s.merge(bits, how='left', left_on=f'm_hat_{stream}', right_on='m')
+        
+            pred_bits = pred_bits_s['bits'].str.cat(sep='')
+            true_bits = true_bits_s['bits'].str.cat(sep='')
+           
+            assert(len(pred_bits) == len(true_bits))
+            
+            true_codewords = []
+            pred_codewords = []
+            for idx in range(0, len(pred_bits), codeword_length):
+                # append the CRC of 0's repeated for length of the generator poly
+                codeword = pred_bits[idx:idx+codeword_length] + '0' * len_poly
+                pred_codewords.append(codeword)
+                
+                codeword = true_bits[idx:idx+codeword_length] + '0' * len_poly
+                true_codewords.append(codeword)
+                
+            true_remainder = [int(p, 2) % int(gen_poly, 2) for p in true_codewords]
+            pred_remainder = [int(p, 2) % int(gen_poly, 2) for p in pred_codewords]
+            
+            # BLER is if the CRC fails
+            BLER_s = [int(i != j) for i, j in zip(true_remainder, pred_remainder)]
+            BLER_s = pd.DataFrame(data={f'BLER_{stream}': BLER_s})
+                                        
+            # Now append to the df_BLERs
+            df_BLERs = pd.concat([df_BLERs, BLER_s], axis=1)
+            
+        df_average_BLER = df_BLERs.mean(axis=0)
+        
+        return df_average_BLER, df_BLERs      
+        
+            
     def symbol_error(self, df):
         modulation = self.modulation
         
@@ -485,7 +532,7 @@ class MachineLearningWireless:
             return df_average_SER, df_SERs, df_average_BER, df_BERs
                     
         return df_average_SER, df_SERs, None, None
-
+    
 
     def dnn_detection(self, df, train_size, n_epochs, batch_size):
 
@@ -559,7 +606,7 @@ class MachineLearningWireless:
         return df_predictions, weighted_average_accuracy
     
 ## Simulation parameters ###########
-noise_power = 1e-2 # in Watts
+noise_power = 1e-3 # in Watts
 N_t = 4
 N_r = 2
 N_symbols = 256
@@ -584,7 +631,7 @@ mse_LS = []
 mse_MachineLearning = []
 mse_npilots = []
 
-N_pilots = np.linspace(50,250,10).astype(int)
+N_pilots = np.linspace(50, 250, 10).astype(int)
 seeds = np.arange(15)
 for s in seeds:
     for N_pilot in N_pilots:
@@ -594,8 +641,8 @@ for s in seeds:
         W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, 
                                           symbols=df, noise_process=n, 
                                           equalizer='MMSE')
-        average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
-                            noise_process=df_equalized.filter(regex='v_'), dB=True)
+        # average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
+        #                     noise_process=df_equalized.filter(regex='v_'), dB=True)
         mse_LS.append(mlw.mse(H, H_hat))
         mse_MachineLearning.append(mlw.mse(H, H_hat_ml))
         mse_npilots.append(N_pilot)
@@ -613,13 +660,18 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
                           title=f'MSE vs Pilot ({N_symbols} symbols)')
 
 #######################################
-# Question: what is the BER
+# Question: what is the BER/BLER
 df_quantized = mlw.quantize(df_equalized, b=np.inf)
 df_detection = mlw.detection(df=df_quantized, constellation=constellation, 
                       how='max_likelihood')
-average_SER, _, average_BER, _ = mlw.symbol_error(df_detection)
-print('Average SNR {} dB'.format(average_receive_SNR.values))
+average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
+                    noise_process=df_detection.filter(regex='v_'), dB=True)
+average_SER, _, average_BER, df_BERs = mlw.symbol_error(df_detection)
+average_BLER, _ = mlw.block_error(df_detection, constellation, df_BERs, codeword_length=10)
+
+print('Average SNR post detection {} dB'.format(average_receive_SNR.values))
 print('Average BER {}'.format(average_BER.values))
+print('Average BLER {}'.format(average_BLER.values))
 
 #######################################
 # Question: how does training data size impact accuracy?
@@ -629,17 +681,11 @@ accuracy_dnn = []
 for t in train_sizes:
     df, average_accuracy_ensemble = mlw.ensemble_detection(df_detection, train_size=t)
     accuracy_ensemble.append(average_accuracy_ensemble)
-    average_SER, _, average_BER, _ = mlw.symbol_error(df_detection)
-    print('Average RF SNR {} dB'.format(average_receive_SNR.values))
-    print('Average RF BER {}'.format(average_BER.values))
 
 for t in train_sizes:
     # Good results show from train_size=0.3 and onwards.
     df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=128, batch_size=8)
     accuracy_dnn.append(average_accuracy_dnn)
-    average_SER, _, average_BER, _ = mlw.symbol_error(df_detection)
-    print('Average DNN SNR {} dB'.format(average_receive_SNR.values))
-    print('Average DNN BER {}'.format(average_BER.values))
 
 myUtils.plotXY(x=train_sizes, y=accuracy_ensemble, xlabel='Pilot [%]', ylabel='Acc', 
               title='Ensemble')

@@ -69,27 +69,11 @@ class EnsembleClassifier:
         self.model = clf.best_estimator_
         self.model.fit(X_train, y_train)
         
+         
         if plotting:
-            # Plot the losses vs epoch here
+            # Plot the losses of training and cross validation data
             fig = plt.figure(figsize=(8, 5))
 
-            # plot1, = plt.plot(history.epoch, history.history['loss'], c='blue')
-            # plot2, = plt.plot(history.epoch, history.history['val_loss'], lw=1.5, ls='--', c='blue')
-            
-            # plt.grid(which='both', linestyle='--')
-            
-            # ax = fig.gca()    
-            # ax_sec = ax.twinx()
-            # plot3, = ax_sec.plot(history.epoch, history.history['accuracy'], lw=2, c='red')       
-            # plot4, = ax_sec.plot(history.epoch, history.history['val_accuracy'], lw=1.5, ls='--', c='red')       
-
-            # ax.set_xlabel(r'Epoch')
-            # ax.set_ylabel(r'Loss')
-            # ax_sec.set_ylabel(r'Accuracy')
-            # plt.legend([plot1, plot2, plot3, plot4], [r'Loss', r'Val Loss', r'Accuracy', r'Val_Accuracy'],
-            #            bbox_to_anchor=(0.2, -0.04, 0.6, 1), bbox_transform=fig.transFigure, 
-            #            loc='lower center', ncol=2, mode="expand", borderaxespad=0.)
-            
             plt.tight_layout()
             plt.show()
             plt.close(fig)
