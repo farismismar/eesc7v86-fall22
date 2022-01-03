@@ -9,7 +9,7 @@ import os
 import random
 import numpy as np
 
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split, GridSearchCV, learning_curve
 from sklearn.utils import class_weight
 
 from sklearn.ensemble import RandomForestClassifier
@@ -67,12 +67,49 @@ class EnsembleClassifier:
         print('Training time: {:.2f} mins.'.format((end_time - start_time) / 60.))
         
         self.model = clf.best_estimator_
-        self.model.fit(X_train, y_train)
-        
-         
+        self.model.fit(X_train, y_train) # to be ready for the inference
+    
         if plotting:
+            train_sizes, train_scores, test_scores = \
+                learning_curve(self.model, X_train, y_train, cv=K_fold,
+                               n_jobs=-1, return_times=False)
+            
+            # Code from https://scikit-learn.org/stable/auto_examples/model_selection/plot_learning_curve.html
+            train_scores_mean = np.mean(train_scores, axis=1)
+            train_scores_std = np.std(train_scores, axis=1)
+            test_scores_mean = np.mean(test_scores, axis=1)
+            test_scores_std = np.std(test_scores, axis=1)
+
             # Plot the losses of training and cross validation data
             fig = plt.figure(figsize=(8, 5))
+            ax = fig.gca()
+            
+            # Code from https://scikit-learn.org/stable/auto_examples/model_selection/plot_learning_curve.html
+            ax.grid()
+            ax.fill_between(
+                train_sizes,
+                train_scores_mean - train_scores_std,
+                train_scores_mean + train_scores_std,
+                alpha=0.1,
+                color="r",
+            )
+            ax.fill_between(
+                train_sizes,
+                test_scores_mean - test_scores_std,
+                test_scores_mean + test_scores_std,
+                alpha=0.1,
+                color="g",
+            )
+            ax.plot(
+                train_sizes, train_scores_mean, "o-", color="r", label="Training score"
+            )
+            ax.plot(
+                train_sizes, test_scores_mean, "o-", color="g", label="Cross-validation score"
+            )
+            ax.legend(loc="best")
+            
+            ax.set_xlabel(r'Training size')
+            ax.set_ylabel(r'Score')
 
             plt.tight_layout()
             plt.show()
