@@ -21,10 +21,6 @@ import time
 
 class EnsembleClassifier:
     def __init__(self, seed=None, prefer_gpu=True, is_booster=True):
-    
-        # use_cuda = len(tf.config.list_physical_devices('GPU')) > 0 and prefer_gpu
-        # self.device = "/gpu:0" if use_cuda else "/cpu:0"
-        
         if seed is None:
             self.seed = np.random.mtrand._rand
         else:
@@ -58,9 +54,9 @@ class EnsembleClassifier:
         if self.is_booster == False:
             base_estimator = RandomForestClassifier(n_estimators=1000, n_jobs=-1, class_weight=class_weights, random_state=self.np_random_state)
             hyperparameters = {'criterion': ['entropy', 'gini'],
-                                #'min_impurity_decrease': [0.1, 0.2],
-                      #'min_weight_fraction_leaf': [0.1, 0.3],
-                      'min_samples_split': [2, 10]}
+                               'min_impurity_decrease': [0.1, 0.2],
+                               'min_weight_fraction_leaf': [0.1, 0.3],
+                               'min_samples_split': [2, 10]}
         else:
             tree_method = 'gpu_hist' if self.prefer_gpu else 'hist'
             

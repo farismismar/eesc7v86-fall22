@@ -576,7 +576,7 @@ class MachineLearningWireless:
         y = df.filter(regex='m_[0-9]+') # clearly m_hat is not welcome :)
         
         classifier = EnsembleClassifier(
-            seed=self.seed, prefer_gpu=self.prefer_gpu)
+            seed=self.seed, prefer_gpu=self.prefer_gpu, is_booster=False)
         
         df_predictions = pd.DataFrame()
         for streams in range(1, N_t + 1):
