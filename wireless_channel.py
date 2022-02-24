@@ -17,9 +17,14 @@ import pdb
 from sklearn.linear_model import LinearRegression
 #from scipy import stats
 
+from sklearn.cluster import KMeans
+
 from dnn import DeepNeuralNetworkClassifier
 from ensemble import EnsembleClassifier
 from utils import Utils
+
+import matplotlib
+import matplotlib.pyplot as plt
 
 class MachineLearningWireless:
     def __init__(self, random_state=None, prefer_gpu=True):
@@ -28,6 +33,7 @@ class MachineLearningWireless:
         
         self.H = None # Channel
         self.F = None # Precoder
+        self.b = None # Quant resolution
         
         self._reset_random_state(random_state)
         
@@ -197,7 +203,8 @@ class MachineLearningWireless:
 
 
     def estimate_channel(self, df_wrangled, N_pilot, noise_power, estimator='least_squares'):       
-
+        # Note that Tr(H_hat) == N_t -- Check MIMO
+        
         X = df_wrangled.filter(regex='x_I').values + 1j * df_wrangled.filter(regex='x_Q').values
         Y = df_wrangled.filter(regex='y_I').values + 1j * df_wrangled.filter(regex='y_Q').values
         
@@ -233,7 +240,7 @@ class MachineLearningWireless:
         ### Learning: use linear regression ###########################################
         reg = LinearRegression(n_jobs=-1, fit_intercept=True)
         X = df_pilot.filter(regex='x')
-        print(X.columns) # to find the order and hence understand the coefficients hij
+        #print(X.columns) # to find the order and hence understand the coefficients hij
         
         H_hat = np.zeros((1, N_t))
         
@@ -278,8 +285,8 @@ class MachineLearningWireless:
     def equalize(self, estimated_channel, symbols, noise_process, equalizer='MMSE'):
         # TODO: what is the difference between a combiner and an equalizer?
         # Where does MRC fit into this?
-        # W is N_t x N_r
         
+        # W is N_t x N_r        
         G = self.G
         noise_variance = self.noise_variance # note this should equal np.var(noise_process)
         N_r = self.N_r
@@ -351,8 +358,8 @@ class MachineLearningWireless:
     
     
     def quantize(self, df, b=1):
+        self.b = b
         # Just append X_hat
-
         X_hat = df.filter(regex='r_')
          
         new_columns = [c.replace('r', 'x_hat') for c in X_hat.columns]
@@ -369,58 +376,72 @@ class MachineLearningWireless:
         return df
     
     
-    # This function provides coherent detection.  That is, we assume H is known.
-    def detection(self, df, constellation, how='max_likelihood'):
-        N_r = self.N_r
+    def unsupervised_detection(self, df, constellation):
+        seed = self.seed
         
-        if how == 'max_likelihood': # maximum likelihood detection    
-            # This is the baseline symbol
-            s_m = constellation['I'] + 1j * constellation['Q']
-            
-            # Construct p(y - x_m):
-            # # Keep in mind that centroids are sorted from m = 0 to M - 1.
-            # for m in constellation['m'].unique():
-            #     # Basically r_I - I and r_Q - Q (or r - s_m) where s_m is mean
-                
-               
-            #     # Following 4.2-15
-            #     p_rI_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'I'].values[0], noise_power / 2.)
-            #     p_rQ_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'Q'].values[0], noise_power / 2.)
-                       
-               
-            for stream in range(1, N_t + 1):
-                df_s = df.filter(regex=f'_{stream}')
-            #     # Now compute p(x_hat | s_m) per branch
-            #    # ###########################         
-            #    #  m_hat = []
-            #    #  for idx, row in df_s.iterrows():
-            #    #      log_density_m = []
-                
+        M = constellation.shape[0]
+        
+        # Intialize k-means centroid location deterministcally as a constellation
+        kmeans = KMeans(n_clusters=M, init=constellation[['I', 'Q']], n_init=1, 
+                        random_state=seed)
 
-            #    #          # Now find the likelihood per I/Q given x_m
-            #    #          log_dens_m_I = np.log(p_rI_given_m.pdf(mean_rI_m))
-            #    #          log_dens_m_Q = np.log(p_rQ_given_m.pdf(mean_rQ_m))
-            #    #          log_density = (log_dens_m_I + log_dens_m_Q)
-            #    #          log_density_m.append(log_density)
-                        
-            #    #      log_density_m = np.array(log_density_m).round(4)
-            #    #      m_hat.append(log_density_m.argmax()) # DigiComm p171
-             
-            #    #  df[f'm_hat_{stream}'] = m_hat 
-            #    #  ######################
-    
-                m_hat = []
-                for idx, row in df_s.iterrows():
-                    x_hat = row.filter(regex='x_hat_I').values + 1j * row.filter(regex='x_hat_Q').values
-        
-                    diff = x_hat - s_m # distance from constellation at baseband
-                    distances = np.abs(diff)
-                    m_hat.append(distances.idxmin()) # from Digi Comm p171
-                    
-                df[f'm_hat_{stream}'] = m_hat 
+        kmeans.fit(constellation[['I', 'Q']])    
+
+        df_predictions = pd.DataFrame()
+        for streams in range(1, N_t + 1):
+            df_ = df.filter(regex=f'{streams}')
+            X_ = pd.DataFrame(data={'I': df_.filter(regex='x_hat_I').squeeze(),
+                                    'Q': df_.filter(regex='x_hat_Q').squeeze()}, index=df_.index)
+ 
+            m_true = df_.filter(regex=f'm_{streams}')
+            m_predict = kmeans.predict(X_)
             
-        return df
+            df_predictions_s = pd.DataFrame(data={'m_pred_unsup': m_predict})
+            df_predictions_s['stream'] = streams
+            df_predictions_s['m_true'] = m_true
+            df_predictions_s = df_predictions_s.join(X_) # add the estimated symbols
+            
+            df_predictions = pd.concat([df_predictions, df_predictions_s], axis=0)
     
+        df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_unsup']).astype(int)
+    
+        df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
+        
+        self.plot_clusters(df_predictions[['stream', 'm_pred_unsup', 'I', 'Q']], constellation)
+    
+        # This is the correct way to calculate accuracy.  Why?
+        weighted_average_accuracy = df_predictions['match'].mean()
+        
+        # This should match the weighted accuracy if streams are equally likely
+        arithmetic_average_accuracy = df_pred_branch['match'].mean()
+        
+        return df_predictions, weighted_average_accuracy
+    
+    
+    # Do some plotting
+    def plot_clusters(self, X, centroids):
+        M = X['m_pred_unsup'].max()
+        limit = np.sqrt(M)
+        
+        plt.rcParams['font.family'] = "Arial"
+        plt.rcParams['font.size'] = "14"
+        
+        fig = plt.figure(figsize=(8,5))
+        for s in sorted(X['stream'].unique()):
+            X_ = X[X['stream'] == s]
+            
+            plt.scatter(X_['I'], X_['Q'], c=X_['m_pred_unsup'], cmap='RdYlGn', alpha=0.5)
+            plt.scatter(centroids['I'], centroids['Q'], c=centroids['m'], cmap='RdYlGn', alpha=0.5, edgecolor='k')
+            plt.grid(which='both')
+            plt.xlabel('$I$')
+            plt.ylabel('$Q$')
+            plt.title(f'I/Q for Stream {s}')
+            plt.xlim(-limit - 1,limit + 1)
+            plt.ylim(-limit - 1,limit + 1)
+            plt.tight_layout()
+            plt.close(fig)
+            plt.show()
+
 
     def compute_receive_snr(self, signal_process, noise_process, dB=False):
         N_r = self.N_r
@@ -532,7 +553,55 @@ class MachineLearningWireless:
                     
         return df_average_SER, df_SERs, None, None
     
-
+    
+    # TODO: bad detection?
+    def ml_detection(self, df, constellation):
+        # This is the baseline symbol
+        s_m = constellation['I'] + 1j * constellation['Q']
+        
+        # Construct p(y - x_m):
+        # # Keep in mind that centroids are sorted from m = 0 to M - 1.
+        # for m in constellation['m'].unique():
+        #     # Basically r_I - I and r_Q - Q (or r - s_m) where s_m is mean
+            
+           
+        #     # Following 4.2-15
+        #     p_rI_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'I'].values[0], noise_power / 2.)
+        #     p_rQ_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'Q'].values[0], noise_power / 2.)
+                   
+        for stream in range(1, N_t + 1):
+            df_s = df.filter(regex=f'_{stream}')
+        #     # Now compute p(x_hat | s_m) per branch
+        #    # ###########################         
+        #    #  m_hat = []
+        #    #  for idx, row in df_s.iterrows():
+        #    #      log_density_m = []
+            
+    
+        #    #          # Now find the likelihood per I/Q given x_m
+        #    #          log_dens_m_I = np.log(p_rI_given_m.pdf(mean_rI_m))
+        #    #          log_dens_m_Q = np.log(p_rQ_given_m.pdf(mean_rQ_m))
+        #    #          log_density = (log_dens_m_I + log_dens_m_Q)
+        #    #          log_density_m.append(log_density)
+                    
+        #    #      log_density_m = np.array(log_density_m).round(4)
+        #    #      m_hat.append(log_density_m.argmax()) # DigiComm p171
+         
+        #    #  df[f'm_hat_{stream}'] = m_hat 
+        #    #  ######################
+    
+            m_hat = []
+            for idx, row in df_s.iterrows():
+                x_hat = row.filter(regex='x_hat_I').values + 1j * row.filter(regex='x_hat_Q').values
+    
+                diff = x_hat - s_m # distance from constellation at baseband
+                distances = np.abs(diff)
+                m_hat.append(distances.idxmin()) # from Digi Comm p171
+                
+            df[f'm_hat_{stream}'] = m_hat 
+            
+        return df
+        
     def dnn_detection(self, df, train_size, n_epochs, batch_size):
 
         X = df.filter(regex='y_|n_|r_|v_|x_hat') # everything except m and true x
@@ -661,8 +730,7 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
 #######################################
 # Question: what is the BER/BLER
 df_quantized = mlw.quantize(df_equalized, b=np.inf)
-df_detection = mlw.detection(df=df_quantized, constellation=constellation, 
-                      how='max_likelihood')
+df_detection = mlw.ml_detection(df=df_quantized, constellation=constellation)
 average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
                     noise_process=df_detection.filter(regex='v_'), dB=True)
 average_SER, df_SERs, average_BER, df_BERs = mlw.symbol_error(df_detection)
@@ -693,6 +761,9 @@ myUtils.plotXY(x=train_sizes, y=accuracy_dnn, xlabel='Pilot [%]', ylabel='Acc',
 myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
                           xlabel='Pilot [%]', y1label='Ensemble', y2label='DNN',
                           title='Ensemble vs DNN')
+
+# Unsupervised: no pilot needed.  Only memory of the constellation.
+df_unsup, average_acc_unsup = mlw.unsupervised_detection(df_detection, constellation)
 
 #######################################
 # Question: what is the CDF of the symbols like?
