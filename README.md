@@ -10,7 +10,7 @@ Channel equalization is performed through the choices of zero forcing and minimu
 
 The current quantization supported at the moment is $b = 1$ (besides no quantization or $b = \inf$).
 
-Symbol detection is performed through three different algorithms: 1) maximum likelihood 2) fully connected deep neural networks and 3) ensemble learning.
+Symbol detection is performed through four different algorithms: 1) maximum likelihood 2) unsupervised learning 3) fully connected deep neural networks and 4) ensemble learning.
 
 Statistics reported are the channel estimation mean squared error, symbol error rate, bit error rate, and block error rate.
 
@@ -34,3 +34,4 @@ primaryClass={cs.IT}
 | Version        | Date           | Description  |
 | ------------- |:-------------:| -----:|
 | 1.0      | 2022-01-02 | First release |
+| 1.1      | 2022-02-24 | Added k-means detection |
