@@ -10,7 +10,8 @@ import random
 import numpy as np
 import pandas as pd
 
-from scipy.ndimage import gaussian_filter
+from scipy.interpolate import UnivariateSpline #, interp1d
+#from scipy.ndimage import gaussian_filter
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -181,7 +182,7 @@ class Utils:
         plt.show()
         plt.close(fig)
         
-        
+
     def plot_cdfs(self, df, measure, category, cmap=None, title=None, is_kde=False, num_bins=200):
         if is_kde:
             self._plot_cdfs_kde(df, measure, category, cmap, title)
@@ -226,6 +227,114 @@ class Utils:
         plt.close(fig)
     
     
+    # TODO
+    def plot_joint_pdf(self, X, Y, title, num_bins=50):
+        fig = plt.figure(figsize=(8, 5))
+
+        H, X_bin_edges, Y_bin_edges = np.histogram2d(X, Y, bins=(num_bins, num_bins), normed=True)
+        for y in np.arange(num_bins):
+            H[y,:] = H[y,:] / sum(H[y,:])
+        pdf = H / num_bins    
+    
+        ax = plt.gca(projection="3d")
+    
+        x, y = np.meshgrid(X_bin_edges, Y_bin_edges)
+
+        surf = ax.plot_surface(x[:num_bins, :num_bins], y[:num_bins, :num_bins], pdf[:num_bins, :num_bins], antialiased=True)
+        ax.view_init(5, 45) # the first param rotates the z axis inwards or outwards the screen.  The second is what we need.
+    
+        # No background color    
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+    
+        # Now set color to white (or whatever is "invisible")
+        ax.xaxis.pane.set_edgecolor('w')
+        ax.yaxis.pane.set_edgecolor('w')
+        ax.zaxis.pane.set_edgecolor('w')
+
+        ax.set_xlabel('3.5 GHz')
+        ax.set_ylabel('28 GHz')
+        ax.set_zlabel('Joint Throughput pdf')
+
+        ax.invert_xaxis()
+        ax.invert_yaxis()
+        
+        ax.set_xlim(int(np.max(X)), 0)
+        ax.set_ylim(int(np.max(Y)), 0)
+        ax.set_zlim(np.min(pdf), np.max(pdf))
+        
+        ax.xaxis.labelpad=20
+        ax.yaxis.labelpad=20
+        ax.zaxis.labelpad=20
+    
+        plt.xticks([3,2,1,0])
+        plt.yticks([15,10,5,0])
+        
+        plt.tight_layout()
+    
+        plt.savefig('figures/joint_throughput_pdf_{}.pdf'.format(p_randomness), format='pdf')
+        matplotlib2tikz.save('figures/joint_throughput_pdf_{}.tikz'.format(p_randomness))
+        plt.show()
+        plt.close(fig)
+    
+
+    # TODO
+    def plot_joint_cdf(self, X, Y, num_bins=100):
+        fig = plt.figure(figsize=(8, 5))
+    
+        H, X_bin_edges, Y_bin_edges = np.histogram2d(X, Y, bins=(num_bins, num_bins), normed=True)
+        for y in np.arange(num_bins):
+            H[y,:] = H[y,:] / sum(H[y,:])
+        pdf = H / num_bins
+    
+        cdf = np.zeros((num_bins, num_bins))
+        for i in np.arange(num_bins):
+            for j in np.arange(num_bins):
+                cdf[i,j] = sum(sum(pdf[:(i+1), :(j+1)]))
+
+        ax = plt.gca(projection="3d")
+        x, y = np.meshgrid(X_bin_edges, Y_bin_edges)
+
+        surf = ax.plot_surface(x[:num_bins, :num_bins], y[:num_bins, :num_bins], cdf[:num_bins, :num_bins], antialiased=True)
+        ax.view_init(5, 45) # the first param rotates the z axis inwards or outwards the screen.  The second is what we need.    
+
+        # No background color    
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+    
+        # Now set color to white (or whatever is "invisible")
+        ax.xaxis.pane.set_edgecolor('w')
+        ax.yaxis.pane.set_edgecolor('w')
+        ax.zaxis.pane.set_edgecolor('w')
+
+        ax.set_xlabel('3.5 GHz')
+        ax.set_ylabel('28 GHz')
+        ax.set_zlabel('Joint Throughput CDF')
+    
+        ax.invert_xaxis()
+        ax.invert_yaxis()
+    
+        ax.set_xlim(int(np.max(X)), 0)
+        ax.set_ylim(int(np.max(Y)), 0)
+        ax.set_zlim(0,1)
+
+        ax.xaxis.labelpad=20
+        ax.yaxis.labelpad=20
+        ax.zaxis.labelpad=20
+
+        plt.xticks([3,2,1,0])
+        plt.yticks([15,10,5,0])
+    
+        plt.tight_layout()
+    
+        plt.savefig('figures/joint_throughput_cdf_{}.pdf'.format(p_randomness), format='pdf')
+        matplotlib2tikz.save('figures/joint_throughput_cdf_{}.tikz'.format(p_randomness))
+        plt.show()
+        plt.close(fig)
+    
+
     def plot_data(self, df_summarized, xlabel, ylabel, category, cmap=None, reveal=False, title=None):
         if cmap is None:
             cmap = self.cmap
@@ -258,11 +367,11 @@ class Utils:
         self.use_average = use_average
         self.smoothing_alpha = smoothing_alpha
         self.low_threshold = low_threshold
-        
+                
         return self
     
-        
-    def algorithm1(self, df_input, x_label, y_label, sigma=1, bin_size=2, burnoff=None):
+    # Latest since Feb 10, 2022
+    def algorithm1(self, df_input, x_label, y_label, order=2, bin_size=2, burnoff=None):
         use_average = self.use_average
         smoothing_alpha = self.smoothing_alpha
         low_threshold = self.low_threshold
@@ -271,14 +380,17 @@ class Utils:
             raise ValueError('Call the configure_algorithm1 method first.')            
         
         random_state = self.np_random_state
-        
+    
         df = df_input[[x_label, y_label]].dropna()
         Q1 = df[y_label].quantile(0.25)
         Q3 = df[y_label].quantile(0.75)
         IQR = Q3 - Q1
+        mean = df[y_label].mean()
+        std = df[y_label].std()
         
         # remove outliers
-        df.loc[(df[y_label] > Q3 + 1.5*IQR) | (df[y_label] < Q1 - 1.5*IQR), y_label] = np.nan
+        df.loc[(df[y_label] >= Q3 + 1.5*IQR) | (df[y_label] <= Q1 - 1.5*IQR), y_label] = np.nan
+        #df.loc[(df[y_label] >= mean + 3*std) | df[y_label] <= mean - 3*std] = np.nan
         
         # Bin the data
         x = df[x_label].dropna()
@@ -295,7 +407,7 @@ class Utils:
         df['x_bin'] = x_binned.values
         
         # pdb.set_trace()
-    
+
         df_ = df.copy()
         # now obtain the aggregate
         if use_average:
@@ -306,14 +418,14 @@ class Utils:
             print('INFORMATION: Binning by the percentile function.')
         
         x_upper = df_summarized['x_bin'].apply(lambda x: x.right)
-    
+
         # if n is small, kill the sample with NaN since the statistic is insufficient.
         df_summarized.loc[:, 'N'] = df.groupby('x_bin').agg('count').reset_index()[x_label]
         df_summarized.loc[df_summarized['N'] < low_threshold, y_label] = np.nan
         df_summarized.loc[:, 'x_fit'] = df_summarized['x_bin'].apply(lambda x: x.mid)
         
         df_summarized.drop('x_bin', axis=1, inplace=True)
-    
+
         # Guess if decreasing through rate of change
         try:
             df_sampling = df_summarized[~df_summarized[y_label].isnull()].sample(n=2, random_state=random_state)
@@ -330,15 +442,21 @@ class Utils:
             else:
                 df_summarized.fillna(method='ffill', inplace=True)
                 df_summarized.dropna(inplace=True)
-        except:
-            print('INFORMATION: cannot determine function direction.')
+        except Exception as e:
+            print(f'INFORMATION: cannot determine function direction due to {e}.')
             df_summarized.dropna(inplace=True)
             
         # Remove burnoff points before running the exponential smoothing
-        if burnoff is not None:
+        if (burnoff is not None) and (burnoff > 0):
             df_summarized = df_summarized.iloc[burnoff:-burnoff, :].reset_index(drop=True)
-            
-        y_smooth = df_summarized[y_label].ewm(alpha=smoothing_alpha).mean()
-        df_summarized.loc[:, 'y_fitted'] = gaussian_filter(y_smooth, sigma=sigma) # small sigma will cause an overfit
-    
+
+    #     y_smooth = df_summarized[y_label].ewm(alpha=smoothing_alpha).mean()
+    #     df_summarized.loc[:, 'y_fitted'] = gaussian_filter(y_smooth, sigma=sigma) # small sigma will cause an overfit
+        
+        #f = interp1d(df_summarized['x_fit'], df_summarized[y_label])
+        
+        f = UnivariateSpline(df_summarized['x_fit'], df_summarized[y_label], k=order)
+        df_summarized.loc[:, 'y_fitted'] = f(df_summarized['x_fit'])
+        
         return df_summarized, x_upper
+    

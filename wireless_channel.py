@@ -11,6 +11,8 @@ import random
 import numpy as np
 import pandas as pd
 
+from itertools import product
+
 import time
 import pdb
 
@@ -46,41 +48,39 @@ class MachineLearningWireless:
             self.seed = seed
         
         os.environ['PYTHONHASHSEED'] = str(self.seed)
-        random.seed(self.seed) # gives a DeprecationWarning
+       # random.seed(self.seed) # gives a DeprecationWarning
         self.np_random_state = np.random.RandomState(self.seed)
         
     
-    def create_channel(self, N_t, N_r, noise_variance=0, large_scale_gain=1, fading='Rayleigh', modulation='BPSK'):
+    def create_channel(self, N_t, N_r, noise_variance=0, large_scale_gain=1, fading='Rayleigh', QAM_modulation=4):
         self.N_t = N_t
         self.N_r = N_r
         
         self.noise_variance = noise_variance
         self.G = large_scale_gain
         self.fading = fading
-        self.modulation = modulation
+        self.modulation_order = QAM_modulation
         np_random_state = self.np_random_state
         
         precision = 6
-        
-        # This will hold the transmitted symbols
-        constellation = pd.DataFrame(columns=['m', 'I', 'Q'])
         
         # TODO: is this necessary?
         E_g = 1 # Pulse with unity energy
         
         # Constructing the constellation following Proakis 
-        if modulation == 'BPSK':
-            True
-        elif modulation == 'QPSK':
-            M = 4
-            for m in range(M):
-                constellation = constellation.append({'m': m,
-                        'I': np.sqrt(E_g / 2) * np.cos(2*np.pi/M*m + np.pi/M),
-                        'Q': np.sqrt(E_g / 2) * np.sin(2*np.pi/M*m + np.pi/M)},
-                        ignore_index=True)
-        else:
-            print('Only modulations supported are BPSK and QPSK.')
+        M = QAM_modulation
+        k = np.log2(M)
+        if k != int(k): # only square QAM is allowed.
+            print('Only square QAM constellations allowed.')
             return None        
+        
+        m = np.arange(M).astype(int)
+        Am = np.arange(-k + 1, k, step=2)
+        Am = product(Am, Am)
+        
+        # This will hold the transmitted symbols
+        constellation = pd.DataFrame(data=list(Am), columns=['I', 'Q'])
+        constellation.insert(0, 'm', m)
         
         # Rayleigh fading channel (assume within coherence time)
         if fading == 'Rayleigh':
@@ -100,7 +100,6 @@ class MachineLearningWireless:
         constellation.iloc[:, 1:] /= np.sqrt(signal_power)     
         constellation = constellation.round(precision)
         
-        constellation.loc[:, 'm'] = constellation.loc[:, 'm'].astype(int)
         constellation['bits'] = np.sign(constellation['I']).apply(lambda x: str(max(0, int(x)))) + \
             np.sign(constellation['Q']).apply(lambda x: str(max(0, int(x))))
         
@@ -468,7 +467,7 @@ class MachineLearningWireless:
         if dB == True:
             df_SNRs = df_SNRs.applymap(lambda x: 10 * np.log10(x))
             df_average = df_average.apply(lambda x: 10 * np.log10(x))
-            
+                
         return df_average, df_SNRs
     
     
@@ -487,7 +486,7 @@ class MachineLearningWireless:
         len_poly = len(gen_poly)
         
         # LTE specifies polynomials in 36.212
-        modulation = self.modulation
+        modulation = self.modulation_order
         bits = constellation[['m', 'bits']]
         
         df_BLERs = pd.DataFrame()
@@ -500,7 +499,7 @@ class MachineLearningWireless:
         
             pred_bits = pred_bits_s['bits'].str.cat(sep='')
             true_bits = true_bits_s['bits'].str.cat(sep='')
-           
+            
             assert(len(pred_bits) == len(true_bits))
             
             true_codewords = []
@@ -529,7 +528,7 @@ class MachineLearningWireless:
         
             
     def symbol_error(self, df):
-        modulation = self.modulation
+        modulation_order = self.modulation_order
         
         df_SERs = pd.DataFrame()
         for stream in range(1, N_t + 1):
@@ -543,7 +542,7 @@ class MachineLearningWireless:
         
         df_average_SER = df_SERs.mean(axis=0)
         
-        if modulation == 'QPSK':
+        if modulation_order == 4:
             new_columns = [c.replace('SER', 'BER') for c in df_SERs.columns]
             df_BERs = df_SERs.applymap(lambda x: 1 - np.sqrt(1 - x))
             df_BERs.columns = new_columns
@@ -687,7 +686,7 @@ myUtils = Utils(seed=seed)
 mlw = MachineLearningWireless(random_state=seed, prefer_gpu=True)
 
 mlw.set_simulation_duration(N_symbols=N_symbols)
-constellation, H = mlw.create_channel(N_t=N_t, N_r=N_r, fading='Rayleigh', modulation='QPSK',
+constellation, H = mlw.create_channel(N_t=N_t, N_r=N_r, fading='Rayleigh', QAM_modulation=4,
                    noise_variance=noise_power, 
                    large_scale_gain=G)
 df = mlw.construct_data(constellation)
