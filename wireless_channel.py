@@ -64,8 +64,8 @@ class MachineLearningWireless:
         
         precision = 6
         
-        # TODO: is this necessary?
-        E_g = 1 # Pulse with unity energy
+        # E_g is not necessary since we are using the amplitude values
+        # directly from the series +-1, 3, ...
         
         # Constructing the constellation following Proakis 
         M = QAM_modulation
@@ -75,7 +75,7 @@ class MachineLearningWireless:
             return None        
         
         m = np.arange(M).astype(int)
-        Am = np.arange(-k + 1, k, step=2)
+        Am = np.arange(-np.sqrt(M) - 1, np.sqrt(M) - 1, step=2) # Proakis p105
         Am = product(Am, Am)
         
         # This will hold the transmitted symbols
