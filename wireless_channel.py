@@ -613,9 +613,10 @@ class MachineLearningWireless:
                 #  ######################
             else:
                 print("WARNING: Only two detection methods supported are Eucliedean and Gaussian PDF.")
-                return df
-                
+                return pd.DataFrame()
+        
         return df
+    
         
     def dnn_detection(self, df, train_size, n_epochs, batch_size):
 
@@ -743,7 +744,7 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
                           title=f'Channel MSE vs Pilot ({N_symbols} symbols)')
 
 #######################################
-# Question: what is the BER/BLER
+# Question: what is the BER/BLER for a given SNR?
 df_detection = mlw.maxlikelihood_detection(df=df_equalized, constellation=constellation)
 average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
                     noise_process=df_detection.filter(regex='v_'), dB=True)
@@ -755,9 +756,28 @@ print('Average BER {}'.format(average_BER.values))
 print('Average BLER {}'.format(average_BLER.values))
 
 #######################################
-# Unsupervised: no pilot needed.  Only memory of the constellation.
+# Question: how do the various detection algorithms perform for a given SNR?
+
+# Clustering: no pilot needed.  Only memory of the constellation.
 df_clustering, average_acc_clustering = mlw.unsupervised_detection(df_equalized, constellation)
-df_maxlikelihood, average_acc_maxlikelihood = mlw.maxlikelihood_detection(df_equalized, constellation, method='pdf')
+
+# Likelihood: memory of the constellation as well as the noise covariance matrix
+# (or noise per branch) to measure statistic.
+df_maxlikelihood = mlw.maxlikelihood_detection(df_equalized, constellation, method='distance')
+                
+# Construct an output dataframe that looks like m_pred, stream, m_true, I, Q, and match
+df_output = pd.DataFrame()
+for stream in range(1, N_t + 1):
+    df_s = df_maxlikelihood.filter(regex=f'_{stream}')
+    df_output['m_pred'] = df_s.filter(regex='m_hat')
+    df_output['I'] = df_s.filter(regex='r_I')
+    df_output['Q'] = df_s.filter(regex='r_Q')
+    df_output['stream'] = stream
+    df_output['m_true'] = df_s.filter(regex='m_[0-9]+')
+df_output['match'] = (df_output['m_pred'] == df_output['m_true']).astype(int)
+
+print('Detection accuracy k-means: {:.4f}%'.format(100*df_clustering['match'].mean()))
+print('Detection accuracy Gaussian pdf: {:.4f}%'.format(100*df_output['match'].mean()))
 
 #######################################
 # Question: what is the CDF of the SNR, SER, BER, and BLER like?
@@ -773,7 +793,6 @@ myUtils.plot_cdfs(df_BERs, measure='value', category='variable')
 df_BLERs = df_BLERs.melt()
 myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
 
-sys.exit(-1)
 #######################################
 # Question: how does training data size impact accuracy?
 train_sizes = N_pilots / N_symbols
@@ -792,5 +811,5 @@ myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
                           xlabel='Pilot size [syms]', y1label='Ensemble', y2label='DNN',
                           title='Ensemble vs DNN')
 
-# Add more plots
+# Add more plots LS, MMSE, DNN, and XGBoost
 df_summary
