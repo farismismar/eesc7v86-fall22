@@ -6,6 +6,7 @@ Created on Fri Dec 24 14:43:23 2021
 """
 
 import os
+import sys
 
 import random
 import numpy as np
@@ -86,10 +87,12 @@ class MachineLearningWireless:
         if fading == 'Rayleigh':
             H = 1. / np.sqrt(2) * (np_random_state.normal(loc=0, scale=1, size=N_t*N_r) + \
                                    1j * np_random_state.normal(loc=0, scale=1, size=N_t*N_r))
-            H = H.reshape(N_r, N_t)
+            H = H.reshape(N_r, N_t)     
+        elif fading == 'AWGN':
+            H = np.eye(N_r, N_t)
         
         # Normalize the channel such that the sq Frobenius norm is N_t N_r        
-        H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)
+        H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)       
         self.H = H
         
         # Precoder F, whose Frobenius norm squared is N_t
@@ -112,6 +115,7 @@ class MachineLearningWireless:
 
 
     def construct_data(self, constellation):
+        # TODO: something is wrong in this function or in creating H
         N_t = self.N_t
         N_r = self.N_r
         H = self.H 
@@ -138,14 +142,11 @@ class MachineLearningWireless:
             
             x = x_I + 1j * x_Q
             
-            power_x = np.mean(abs(x_I) ** 2 + abs(x_Q) ** 2) # Mean symbol power
-            x /= np.sqrt(power_x) # Normalize power dividing by the sqrt(energy)
- 
             # Circular Gaussian with a total variance of noise_variance
             # Noise power in Watts
-            n_I = np_random_state.normal(loc=0., scale=np.sqrt(noise_variance / 2.), 
+            n_I = 1./np.sqrt(2) * np_random_state.normal(loc=0., scale=np.sqrt(noise_variance), 
                                    size=N_r)
-            n_Q = np_random_state.normal(loc=0., scale=np.sqrt(noise_variance / 2.), 
+            n_Q = 1./np.sqrt(2) * np_random_state.normal(loc=0., scale=np.sqrt(noise_variance), 
                                    size=N_r)
             n = n_I + 1j * n_Q
             
@@ -153,8 +154,10 @@ class MachineLearningWireless:
             G = self.G # large scale channel effect
             HFx = np.sqrt(G) * np.matmul(np.matmul(H, F), x)
             
+            P_x = x.apply(lambda x: np.abs(x) ** 2).mean()
+            
             # Distribute power equally over transmit antennas
-            normalized_HFx = np.sqrt(power_x/N_t) * HFx
+            normalized_HFx = np.sqrt(P_x/N_t) * HFx
             y = normalized_HFx + n
             
             x_I = np.real(x)
@@ -388,8 +391,8 @@ class MachineLearningWireless:
         df_predictions = pd.DataFrame()
         for streams in range(1, N_t + 1):
             df_ = df.filter(regex=f'{streams}')
-            X_ = pd.DataFrame(data={'I': df_.filter(regex='x_I').squeeze(),
-                                    'Q': df_.filter(regex='x_Q').squeeze()}, index=df_.index)
+            X_ = pd.DataFrame(data={'I': df_.filter(regex='r_I').squeeze(),
+                                    'Q': df_.filter(regex='r_Q').squeeze()}, index=df_.index)
  
             m_true = df_.filter(regex=f'm_{streams}')
             m_predict = kmeans.predict(X_)
@@ -404,7 +407,7 @@ class MachineLearningWireless:
         df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_unsup']).astype(int)
     
         df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
-        
+
         self.plot_clusters(df_predictions[['stream', 'm_pred_unsup', 'I', 'Q']], constellation)
     
         # This is the correct way to calculate accuracy.  Why?
@@ -541,13 +544,15 @@ class MachineLearningWireless:
         
         df_average_SER = df_SERs.mean(axis=0)
         
+        # TODO: find the symbol error for all modulation types
         if modulation_order == 4:
             new_columns = [c.replace('SER', 'BER') for c in df_SERs.columns]
             df_BERs = df_SERs.applymap(lambda x: 1 - np.sqrt(1 - x))
             df_BERs.columns = new_columns
             df_average_BER = df_BERs.mean(axis=0)
-            
             return df_average_SER, df_SERs, df_average_BER, df_BERs
+        else:
+            print(f'CRITICAL: Modulation order {modulation_order} not done yet.  Code needed.')
                     
         return df_average_SER, df_SERs, None, None
     
@@ -595,7 +600,7 @@ class MachineLearningWireless:
                 diff = r - s_m # distance from constellation at baseband
                 distances = np.abs(diff)
                 m_hat.append(distances.idxmin()) # from Digi Comm p171
-                
+            
             df[f'm_hat_{stream}'] = m_hat 
             
         return df
@@ -672,11 +677,11 @@ class MachineLearningWireless:
         return df_predictions, weighted_average_accuracy
     
 ## Simulation parameters ###########
-noise_power = 1e-2 # in Watts
-N_t = 4
+noise_power = 0.1 # in Watts
+N_t = 2
 N_r = 2
 N_symbols = 256
-N_pilot = 77 # for channel estimation
+N_pilot = 5 # for channel estimation
 seed = 0
 G = 1 # linear of large scale gain
 myUtils = Utils(seed=seed)
@@ -697,7 +702,7 @@ mse_LS = []
 mse_MachineLearning = []
 mse_npilots = []
 
-N_pilots = np.linspace(50, 250, 10).astype(int)
+N_pilots = np.linspace(100, N_symbols, 7).astype(int)
 seeds = np.arange(15)
 for s in seeds:
     for N_pilot in N_pilots:
@@ -724,7 +729,7 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
                           xlabel='Pilot size [syms]', y1label='LS estimation', 
                           y2label='LinearReg estimation', 
                           logy=True,
-                          title=f'MSE vs Pilot ({N_symbols} symbols)')
+                          title=f'Channel MSE vs Pilot ({N_symbols} symbols)')
 
 #######################################
 # Question: what is the BER/BLER
@@ -742,9 +747,10 @@ print('Average BLER {}'.format(average_BLER.values))
 # Unsupervised: no pilot needed.  Only memory of the constellation.
 df_unsup, average_acc_unsup = mlw.unsupervised_detection(df_equalized, constellation)
 
+sys.exit(-1)
 #######################################
 # Question: how does training data size impact accuracy?
-train_sizes = np.arange(0.1, 1, 0.1)
+train_sizes = N_pilots / N_symbols
 accuracy_ensemble = []
 accuracy_dnn = []
 for t in train_sizes:
@@ -752,31 +758,16 @@ for t in train_sizes:
     accuracy_ensemble.append(average_accuracy_ensemble)
 
 for t in train_sizes:
-    # Good results show from train_size=0.3 and onwards.
-    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=128, batch_size=8)
+    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=10, batch_size=train_sizes//2)
     accuracy_dnn.append(average_accuracy_dnn)
 
-myUtils.plotXY(x=train_sizes, y=accuracy_ensemble, xlabel='Pilot [%]', ylabel='Acc', 
-              title='Ensemble')
-myUtils.plotXY(x=train_sizes, y=accuracy_dnn, xlabel='Pilot [%]', ylabel='Acc', 
-              title='DNN')
+# TODO: seems that XGBoost is better than DNN.  Why?
 myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
-                          xlabel='Pilot [%]', y1label='Ensemble', y2label='DNN',
+                          xlabel='Pilot size [syms]', y1label='Ensemble', y2label='DNN',
                           title='Ensemble vs DNN')
 
-#######################################
-# Question: what is the CDF of the symbols like?
-df_exploration = df_detection[['x_hat_I_1', 'x_hat_Q_1']]
-df_1 = df_exploration['x_hat_I_1'].to_frame()
-df_1['IQ'] = 'I'
-df_1.columns = ['x_hat', 'IQ']
-
-df_2 = df_exploration['x_hat_Q_1'].to_frame()
-df_2['IQ'] = 'Q'
-df_2.columns = ['x_hat', 'IQ']
-
-df = pd.concat([df_1, df_2], axis=0)
-myUtils.plot_cdfs(df, 'x_hat', 'IQ')
+# Add more plots
+df_summary
 
 #######################################
 # Question: what is the CDF of the SNR, SER, BER, and BLER like?
