@@ -473,8 +473,12 @@ class MachineLearningWireless:
         return df_average, df_SNRs
     
     
+    def _vectorize(self, A):
+        return A.flatten(order='F')
+    
+    
     def mse(self, true, estimate):
-        error_vector = true.reshape(-1, 1) - estimate.reshape(-1, 1)
+        error_vector = self._vectorize(true) - self._vectorize(estimate)
         N_pilot = error_vector.shape[0]
         MSE = np.linalg.norm(np.abs(error_vector) ** 2, 2) / N_pilot
         return MSE
@@ -576,8 +580,7 @@ class MachineLearningWireless:
                 
                 df[f'm_hat_{stream}'] = m_hat 
                 ##
-            elif method == 'pdf':             
-                #pdb.set_trace()
+            elif method == 'pdf':
                 # Now compute p(r | s_m) per branch
                 # ###########################
                 m_hat = []
@@ -711,6 +714,7 @@ df, X_true, n = mlw.wrangle_data(df)
 #######################################
 # Question: how does the LS and linear regression perform for a given pilot?
 mse_LS = []
+mse_LMMSE = []
 mse_MachineLearning = []
 mse_npilots = []
 
@@ -720,26 +724,29 @@ for s in seeds:
     for N_pilot in N_pilots:
         mlw._reset_random_state(seed=s)
         H_hat_ml = mlw.estimate_channel_learning(df, N_pilot, how='linear_regression')
-        H_hat = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
+        H_hat_ls = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
+        H_hat_lmmse = mlw.estimate_channel(df, N_pilot, noise_power, estimator='lmmse')
         df_quantized = mlw.quantize(df, b=np.inf)
-        W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, 
+        W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ls, 
                                           symbols=df_quantized, noise_process=n, 
                                           equalizer='MMSE')
         # average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
         #                     noise_process=df_equalized.filter(regex='v_'), dB=True)
-        mse_LS.append(mlw.mse(H, H_hat))
+        mse_LS.append(mlw.mse(H, H_hat_ls))
+        mse_LMMSE.append(mlw.mse(H, H_hat_lmmse))
         mse_MachineLearning.append(mlw.mse(H, H_hat_ml))
         mse_npilots.append(N_pilot)
         
 df_summary = pd.DataFrame(data={'N_pilot': mse_npilots,
                                 'MSE_LS': mse_LS,
+                                'MSE_LMMSE': mse_LMMSE,
                                 'MSE_ML': mse_MachineLearning})
 
 df_summary = df_summary.groupby('N_pilot').mean().reset_index()
 
-myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=df_summary['MSE_ML'], 
+myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=df_summary['MSE_ML'], y3=df_summary['MSE_LMMSE'],
                           xlabel='Pilot size [syms]', y1label='LS estimation', 
-                          y2label='LinearReg estimation', 
+                          y2label='LinearReg estimation', y3label='LMMSE estimation',
                           logy=True,
                           title=f'Channel MSE vs Pilot ({N_symbols} symbols)')
 
@@ -798,7 +805,7 @@ df_BLERs = df_BLERs.melt()
 myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
 
 #######################################
-# Question: how does training data size impact accuracy?
+# Question: how does training data size impact detection accuracy?
 train_sizes = N_pilots[:-1] / N_symbols
 accuracy_ensemble = []
 accuracy_dnn = []
@@ -807,13 +814,13 @@ for t in train_sizes:
     accuracy_ensemble.append(average_accuracy_ensemble)
 
 for t in train_sizes:
-    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=96, batch_size=N_symbols//2)
+    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=96, batch_size=16)
     accuracy_dnn.append(average_accuracy_dnn)
 
 # TODO: seems that XGBoost is better than DNN.  Why?
-myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
+myUtils.plotXY_comparison(x=train_sizes * N_symbols, y1=accuracy_ensemble, y2=accuracy_dnn,
                           xlabel='Pilot size [syms]', y1label='Ensemble', y2label='DNN',
-                          title='Ensemble vs DNN')
+                          title='Ensemble vs DNN Symbol Detection Accuracy')
 
 # Add more plots LS, MMSE, DNN, and XGBoost
 df_summary
