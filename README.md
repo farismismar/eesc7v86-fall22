@@ -32,6 +32,7 @@ primaryClass={cs.IT}
 ## Versioning
 
 | Version        | Date           | Description  |
-| ------------- |:-------------:| -----:|
+| ------------- |:-------------:| :-----|
 | 1.0      | 2022-01-02 | First release |
 | 1.1      | 2022-02-24 | Added k-means detection |
+| 1.2      | 2022-03-07 | Added unsupervised detection and M-QAM |
