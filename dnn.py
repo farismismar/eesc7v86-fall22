@@ -52,7 +52,7 @@ class DeepNeuralNetworkClassifier:
         set_random_seed(self.seed)
         
         self.le = None
-        self.learning_rate = 0.1
+        self.learning_rate = 0.05
         
         plt.rcParams['font.family'] = "Arial"
         plt.rcParams['font.size'] = "14"

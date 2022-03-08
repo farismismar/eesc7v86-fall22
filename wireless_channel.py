@@ -768,14 +768,18 @@ df_maxlikelihood = mlw.maxlikelihood_detection(df_equalized, constellation, meth
 # Construct an output dataframe that looks like m_pred, stream, m_true, I, Q, and match
 df_output = pd.DataFrame()
 for stream in range(1, N_t + 1):
+    df_output_ = pd.DataFrame()
     df_s = df_maxlikelihood.filter(regex=f'_{stream}')
-    df_output['m_pred'] = df_s.filter(regex='m_hat')
-    df_output['I'] = df_s.filter(regex='r_I')
-    df_output['Q'] = df_s.filter(regex='r_Q')
-    df_output['stream'] = stream
-    df_output['m_true'] = df_s.filter(regex='m_[0-9]+')
+    df_output_['m_pred'] = df_s.filter(regex='m_hat')
+    df_output_['I'] = df_s.filter(regex='r_I')
+    df_output_['Q'] = df_s.filter(regex='r_Q')
+    df_output_['stream'] = stream
+    df_output_['m_true'] = df_s.filter(regex='m_[0-9]+')
+    df_output = pd.concat([df_output, df_output_], axis=0)
+    
 df_output['match'] = (df_output['m_pred'] == df_output['m_true']).astype(int)
 
+# These are essentially identical in a Gaussian channel.
 print('Detection accuracy k-means: {:.4f}%'.format(100*df_clustering['match'].mean()))
 print('Detection accuracy Gaussian pdf: {:.4f}%'.format(100*df_output['match'].mean()))
 
@@ -795,7 +799,7 @@ myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
 
 #######################################
 # Question: how does training data size impact accuracy?
-train_sizes = N_pilots / N_symbols
+train_sizes = N_pilots[:-1] / N_symbols
 accuracy_ensemble = []
 accuracy_dnn = []
 for t in train_sizes:
@@ -803,7 +807,7 @@ for t in train_sizes:
     accuracy_ensemble.append(average_accuracy_ensemble)
 
 for t in train_sizes:
-    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=10, batch_size=train_sizes//2)
+    df, average_accuracy_dnn = mlw.dnn_detection(df_detection, train_size=t, n_epochs=96, batch_size=N_symbols//2)
     accuracy_dnn.append(average_accuracy_dnn)
 
 # TODO: seems that XGBoost is better than DNN.  Why?
