@@ -7,7 +7,7 @@ Created on Wed Dec 29 21:13:45 2021
 
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# For Windows: path to NVIDIA's cudnn libraries.
+
 if os.name == 'nt':
     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.5/bin")
 
@@ -15,7 +15,7 @@ import tensorflow as tf
 #print(tf.config.list_physical_devices('GPU'))
 
 # The GPU ID to use, usually either "0" or "1" based on previous line.
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"   # My NVIDIA GeForce RTX 3050 Ti GPU output from line 18
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"   # My NVIDIA GeForce RTX 3050 Ti GPU output from line 15
 
 import random
 import numpy as np
