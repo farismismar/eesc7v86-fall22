@@ -18,7 +18,7 @@ import time
 import pdb
 
 from sklearn.linear_model import LinearRegression
-#from scipy import stats
+from scipy import stats
 
 from sklearn.cluster import KMeans
 
@@ -100,9 +100,10 @@ class MachineLearningWireless:
         
         # Normalize the transmitted symbols
         signal_power = np.mean(constellation['I'] ** 2 + constellation['Q'] ** 2)
-        constellation.iloc[:, 1:] /= np.sqrt(signal_power)
+        constellation.iloc[:, 1:] /= np.sqrt(signal_power) #* N_t
+
         constellation = constellation.round(precision)
-        
+               
         # TODO: instead of binary coding, do Gray coding.
         constellation['bits'] = constellation['m'].apply(lambda x: format(x, 'b').zfill(int(k)))
         return constellation, H
@@ -115,7 +116,6 @@ class MachineLearningWireless:
 
 
     def construct_data(self, constellation):
-        # TODO: something is wrong in this function or in creating H
         N_t = self.N_t
         N_r = self.N_r
         H = self.H 
@@ -155,6 +155,7 @@ class MachineLearningWireless:
             HFx = np.sqrt(G) * np.matmul(np.matmul(H, F), x)
             
             P_x = x.apply(lambda x: np.abs(x) ** 2).mean()
+            #print(f'Symbol {sym} power is {P_x:.5f} Watts.') # This should be 1
             
             # Distribute power equally over transmit antennas
             normalized_HFx = np.sqrt(P_x/N_t) * HFx
@@ -422,23 +423,22 @@ class MachineLearningWireless:
     # Do some plotting
     def plot_clusters(self, X, centroids):
         M = X['m_pred_unsup'].max()
-        limit = np.sqrt(M)
-        
+
         plt.rcParams['font.family'] = "Arial"
         plt.rcParams['font.size'] = "14"
         
-        fig = plt.figure(figsize=(8,5))
         for s in sorted(X['stream'].unique()):
             X_ = X[X['stream'] == s]
             
+            fig = plt.figure(figsize=(8,5))
             plt.scatter(X_['I'], X_['Q'], c=X_['m_pred_unsup'], cmap='RdYlGn', alpha=0.5)
-            plt.scatter(centroids['I'], centroids['Q'], c=centroids['m'], cmap='RdYlGn', alpha=0.5, edgecolor='k')
+            plt.scatter(centroids['I'], centroids['Q'], c=centroids['m'], cmap='RdYlGn', alpha=0.5, lw=2, edgecolor='k')
             plt.grid(which='both')
             plt.xlabel('$I$')
             plt.ylabel('$Q$')
             plt.title(f'I/Q for Stream {s}')
-            plt.xlim(-limit - 1,limit + 1)
-            plt.ylim(-limit - 1,limit + 1)
+            # plt.xlim(-limit, limit)
+            # plt.ylim(-limit, limit)
             plt.tight_layout()
             plt.show()
             plt.close(fig)
@@ -552,57 +552,69 @@ class MachineLearningWireless:
             df_average_BER = df_BERs.mean(axis=0)
             return df_average_SER, df_SERs, df_average_BER, df_BERs
         else:
-            print(f'CRITICAL: Modulation order {modulation_order} not done yet.  Code needed.')
+            print(f'CRITICAL: Modulation order {modulation_order} not done yet.  Code needed to solve a polynomial.')
                     
         return df_average_SER, df_SERs, None, None
     
     
-    def ml_detection(self, df, constellation):
-        
+    def maxlikelihood_detection(self, df, constellation, method='distance'):
         # This is the baseline symbol
         s_m = constellation['I'] + 1j * constellation['Q']
         
-        # Construct p(r - s_m):
-        # # Keep in mind that centroids are sorted from m = 0 to M - 1.
-        # for m in constellation['m'].unique():
-        #     # Basically r_I - I and r_Q - Q (or r - s_m) where s_m is mean
-            
-           
-        #     # Following 4.2-15
-        #     p_rI_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'I'].values[0], noise_power / 2.)
-        #     p_rQ_given_m = stats.norm(constellation.loc[centroids['m'] == m, 'Q'].values[0], noise_power / 2.)
-                   
         for stream in range(1, N_t + 1):
             df_s = df.filter(regex=f'_{stream}')
-        #     # Now compute p(r | s_m) per branch
-        #    # ###########################         
-        #    #  m_hat = []
-        #    #  for idx, row in df_s.iterrows():
-        #    #      log_density_m = []
-            
-    
-        #    #          # Now find the likelihood per I/Q given x_m
-        #    #          log_dens_m_I = np.log(p_rI_given_m.pdf(mean_rI_m))
-        #    #          log_dens_m_Q = np.log(p_rQ_given_m.pdf(mean_rQ_m))
-        #    #          log_density = (log_dens_m_I + log_dens_m_Q)
-        #    #          log_density_m.append(log_density)
-                    
-        #    #      log_density_m = np.array(log_density_m).round(4)
-        #    #      m_hat.append(log_density_m.argmax()) # DigiComm p171
-         
-        #    #  df[f'm_hat_{stream}'] = m_hat 
-        #    #  ######################
-    
+
             m_hat = []
-            for idx, row in df_s.iterrows():
-                r = row.filter(regex='r_I').values + 1j * row.filter(regex='r_Q').values
+            if method == 'distance':
+                ###
+                for idx, row in df_s.iterrows():
+                    r = row.filter(regex='r_I').values + 1j * row.filter(regex='r_Q').values
+        
+                    diff = r - s_m # distance from constellation at baseband
+                    distances = np.abs(diff)
+                    m_hat.append(distances.idxmin()) # from Digi Comm p171
+                
+                df[f'm_hat_{stream}'] = m_hat 
+                ##
+            elif method == 'pdf':             
+                #pdb.set_trace()
+                # Now compute p(r | s_m) per branch
+                # ###########################
+                m_hat = []
+                for idx, row in df_s.iterrows():
+                    log_density_m = []
+                    max_log_density = -np.inf
+                    max_m = -1
+                    for m in constellation['m'].unique():
+                        # Start with pdf statistics mean and variance
+                        mean_I_m = constellation.loc[constellation['m'] == m, 'I'].values[0]
+                        mean_Q_m = constellation.loc[constellation['m'] == m, 'Q'].values[0]
+                    
+                        var_vI_m = df_s.filter(regex='v_I').var().values[0]
+                        var_vQ_m = df_s.filter(regex='v_Q').var().values[0]
+                        
+                        # Generate the likelihood functions based on statistics
+                        p_rI_given_m = stats.norm(mean_I_m, var_vI_m)
+                        p_rQ_given_m = stats.norm(mean_Q_m, var_vQ_m)
     
-                diff = r - s_m # distance from constellation at baseband
-                distances = np.abs(diff)
-                m_hat.append(distances.idxmin()) # from Digi Comm p171
-            
-            df[f'm_hat_{stream}'] = m_hat 
-            
+                        # Now find the likelihood per I/Q given x_m
+                        log_dens_m_I = np.log(p_rI_given_m.pdf(row.filter(regex='r_I').values[0]))
+                        log_dens_m_Q = np.log(p_rQ_given_m.pdf(row.filter(regex='r_Q').values[0]))
+                        log_density = (log_dens_m_I + log_dens_m_Q)
+                        
+                        # and the maximum likelihood m
+                        if log_density > max_log_density:
+                            max_m = m
+                            max_log_density = log_density
+                        
+                    m_hat.append(max_m)
+           
+                df[f'm_hat_{stream}'] = m_hat
+                #  ######################
+            else:
+                print("WARNING: Only two detection methods supported are Eucliedean and Gaussian PDF.")
+                return df
+                
         return df
         
     def dnn_detection(self, df, train_size, n_epochs, batch_size):
@@ -680,8 +692,7 @@ class MachineLearningWireless:
 noise_power = 0.1 # in Watts
 N_t = 2
 N_r = 2
-N_symbols = 256
-N_pilot = 5 # for channel estimation
+N_symbols = 1024
 seed = 0
 G = 1 # linear of large scale gain
 myUtils = Utils(seed=seed)
@@ -703,7 +714,7 @@ mse_MachineLearning = []
 mse_npilots = []
 
 N_pilots = np.linspace(100, N_symbols, 7).astype(int)
-seeds = np.arange(15)
+seeds = np.arange(5)
 for s in seeds:
     for N_pilot in N_pilots:
         mlw._reset_random_state(seed=s)
@@ -733,7 +744,7 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
 
 #######################################
 # Question: what is the BER/BLER
-df_detection = mlw.ml_detection(df=df_equalized, constellation=constellation)
+df_detection = mlw.maxlikelihood_detection(df=df_equalized, constellation=constellation)
 average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
                     noise_process=df_detection.filter(regex='v_'), dB=True)
 average_SER, df_SERs, average_BER, df_BERs = mlw.symbol_error(df_detection)
@@ -745,7 +756,22 @@ print('Average BLER {}'.format(average_BLER.values))
 
 #######################################
 # Unsupervised: no pilot needed.  Only memory of the constellation.
-df_unsup, average_acc_unsup = mlw.unsupervised_detection(df_equalized, constellation)
+df_clustering, average_acc_clustering = mlw.unsupervised_detection(df_equalized, constellation)
+df_maxlikelihood, average_acc_maxlikelihood = mlw.maxlikelihood_detection(df_equalized, constellation, method='pdf')
+
+#######################################
+# Question: what is the CDF of the SNR, SER, BER, and BLER like?
+df_receive_SNR = df_receive_SNR.melt()
+myUtils.plot_cdfs(df_receive_SNR, measure='value', category='variable')
+
+df_SERs = df_SERs.melt()
+myUtils.plot_cdfs(df_SERs, measure='value', category='variable')
+
+df_BERs = df_BERs.melt()
+myUtils.plot_cdfs(df_BERs, measure='value', category='variable')
+
+df_BLERs = df_BLERs.melt()
+myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
 
 sys.exit(-1)
 #######################################
@@ -768,17 +794,3 @@ myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
 
 # Add more plots
 df_summary
-
-#######################################
-# Question: what is the CDF of the SNR, SER, BER, and BLER like?
-df_receive_SNR = df_receive_SNR.melt()
-myUtils.plot_cdfs(df_receive_SNR, measure='value', category='variable')
-
-df_SERs = df_SERs.melt()
-myUtils.plot_cdfs(df_SERs, measure='value', category='variable')
-
-df_BERs = df_BERs.melt()
-myUtils.plot_cdfs(df_BERs, measure='value', category='variable')
-
-df_BLERs = df_BLERs.melt()
-myUtils.plot_cdfs(df_BLERs, measure='value', category='variable')
