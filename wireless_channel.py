@@ -75,7 +75,7 @@ class MachineLearningWireless:
             return None        
         
         m = np.arange(M).astype(int)
-        Am = np.arange(-np.sqrt(M) - 1, np.sqrt(M) - 1, step=2) # Proakis p105
+        Am = np.arange(-np.sqrt(M) + 1, np.sqrt(M), step=2) # Proakis p105
         Am = product(Am, Am)
         
         # This will hold the transmitted symbols
@@ -97,12 +97,11 @@ class MachineLearningWireless:
         
         # Normalize the transmitted symbols
         signal_power = np.mean(constellation['I'] ** 2 + constellation['Q'] ** 2)
-        constellation.iloc[:, 1:] /= np.sqrt(signal_power)     
+        constellation.iloc[:, 1:] /= np.sqrt(signal_power)
         constellation = constellation.round(precision)
         
-        constellation['bits'] = np.sign(constellation['I']).apply(lambda x: str(max(0, int(x)))) + \
-            np.sign(constellation['Q']).apply(lambda x: str(max(0, int(x))))
-        
+        # TODO: instead of binary coding, do Gray coding.
+        constellation['bits'] = constellation['m'].apply(lambda x: format(x, 'b').zfill(int(k)))
         return constellation, H
 
     
@@ -389,8 +388,8 @@ class MachineLearningWireless:
         df_predictions = pd.DataFrame()
         for streams in range(1, N_t + 1):
             df_ = df.filter(regex=f'{streams}')
-            X_ = pd.DataFrame(data={'I': df_.filter(regex='x_hat_I').squeeze(),
-                                    'Q': df_.filter(regex='x_hat_Q').squeeze()}, index=df_.index)
+            X_ = pd.DataFrame(data={'I': df_.filter(regex='x_I').squeeze(),
+                                    'Q': df_.filter(regex='x_Q').squeeze()}, index=df_.index)
  
             m_true = df_.filter(regex=f'm_{streams}')
             m_predict = kmeans.predict(X_)
@@ -438,9 +437,9 @@ class MachineLearningWireless:
             plt.xlim(-limit - 1,limit + 1)
             plt.ylim(-limit - 1,limit + 1)
             plt.tight_layout()
-            plt.close(fig)
             plt.show()
-
+            plt.close(fig)
+            
 
     def compute_receive_snr(self, signal_process, noise_process, dB=False):
         N_r = self.N_r
@@ -553,12 +552,12 @@ class MachineLearningWireless:
         return df_average_SER, df_SERs, None, None
     
     
-    # TODO: bad detection?
     def ml_detection(self, df, constellation):
+        
         # This is the baseline symbol
         s_m = constellation['I'] + 1j * constellation['Q']
         
-        # Construct p(y - x_m):
+        # Construct p(r - s_m):
         # # Keep in mind that centroids are sorted from m = 0 to M - 1.
         # for m in constellation['m'].unique():
         #     # Basically r_I - I and r_Q - Q (or r - s_m) where s_m is mean
@@ -570,7 +569,7 @@ class MachineLearningWireless:
                    
         for stream in range(1, N_t + 1):
             df_s = df.filter(regex=f'_{stream}')
-        #     # Now compute p(x_hat | s_m) per branch
+        #     # Now compute p(r | s_m) per branch
         #    # ###########################         
         #    #  m_hat = []
         #    #  for idx, row in df_s.iterrows():
@@ -591,9 +590,9 @@ class MachineLearningWireless:
     
             m_hat = []
             for idx, row in df_s.iterrows():
-                x_hat = row.filter(regex='x_hat_I').values + 1j * row.filter(regex='x_hat_Q').values
+                r = row.filter(regex='r_I').values + 1j * row.filter(regex='r_Q').values
     
-                diff = x_hat - s_m # distance from constellation at baseband
+                diff = r - s_m # distance from constellation at baseband
                 distances = np.abs(diff)
                 m_hat.append(distances.idxmin()) # from Digi Comm p171
                 
@@ -673,7 +672,7 @@ class MachineLearningWireless:
         return df_predictions, weighted_average_accuracy
     
 ## Simulation parameters ###########
-noise_power = 1e-3 # in Watts
+noise_power = 1e-2 # in Watts
 N_t = 4
 N_r = 2
 N_symbols = 256
@@ -705,8 +704,9 @@ for s in seeds:
         mlw._reset_random_state(seed=s)
         H_hat_ml = mlw.estimate_channel_learning(df, N_pilot, how='linear_regression')
         H_hat = mlw.estimate_channel(df, N_pilot, noise_power, estimator='least_squares')
+        df_quantized = mlw.quantize(df, b=np.inf)
         W, df_equalized, v = mlw.equalize(estimated_channel=H_hat_ml, 
-                                          symbols=df, noise_process=n, 
+                                          symbols=df_quantized, noise_process=n, 
                                           equalizer='MMSE')
         # average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_equalized.filter(regex='r_'),
         #                     noise_process=df_equalized.filter(regex='v_'), dB=True)
@@ -728,8 +728,7 @@ myUtils.plotXY_comparison(x=df_summary['N_pilot'], y1=df_summary['MSE_LS'], y2=d
 
 #######################################
 # Question: what is the BER/BLER
-df_quantized = mlw.quantize(df_equalized, b=np.inf)
-df_detection = mlw.ml_detection(df=df_quantized, constellation=constellation)
+df_detection = mlw.ml_detection(df=df_equalized, constellation=constellation)
 average_receive_SNR, df_receive_SNR = mlw.compute_receive_snr(signal_process=df_detection.filter(regex='r_'),
                     noise_process=df_detection.filter(regex='v_'), dB=True)
 average_SER, df_SERs, average_BER, df_BERs = mlw.symbol_error(df_detection)
@@ -738,6 +737,10 @@ average_BLER, df_BLERs = mlw.block_error(df_detection, constellation, df_BERs, c
 print('Average SNR post detection {} dB'.format(average_receive_SNR.values))
 print('Average BER {}'.format(average_BER.values))
 print('Average BLER {}'.format(average_BLER.values))
+
+#######################################
+# Unsupervised: no pilot needed.  Only memory of the constellation.
+df_unsup, average_acc_unsup = mlw.unsupervised_detection(df_equalized, constellation)
 
 #######################################
 # Question: how does training data size impact accuracy?
@@ -760,9 +763,6 @@ myUtils.plotXY(x=train_sizes, y=accuracy_dnn, xlabel='Pilot [%]', ylabel='Acc',
 myUtils.plotXY_comparison(x=train_sizes, y1=accuracy_ensemble, y2=accuracy_dnn,
                           xlabel='Pilot [%]', y1label='Ensemble', y2label='DNN',
                           title='Ensemble vs DNN')
-
-# Unsupervised: no pilot needed.  Only memory of the constellation.
-df_unsup, average_acc_unsup = mlw.unsupervised_detection(df_detection, constellation)
 
 #######################################
 # Question: what is the CDF of the symbols like?
