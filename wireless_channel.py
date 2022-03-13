@@ -103,9 +103,14 @@ class MachineLearningWireless:
         constellation.iloc[:, 1:] /= np.sqrt(signal_power) #* N_t
 
         constellation = constellation.round(precision)
+
+        # Binary coding
+        #constellation['bits'] = constellation['m'].apply(lambda x: format(x, 'b').zfill(int(k)))
                
-        # TODO: instead of binary coding, do Gray coding.
-        constellation['bits'] = constellation['m'].apply(lambda x: format(x, 'b').zfill(int(k)))
+        # Gray coding
+        gray_codes = mlw._generate_graycode(k=k)
+        constellation['bits'] = constellation['m'].apply(lambda x: gray_codes[x])
+        
         return constellation, H
 
     
@@ -203,6 +208,17 @@ class MachineLearningWireless:
         
         return df_wrangled, X_true, n
 
+
+
+    def _generate_graycode(self, k):
+        # Modified from https://stackoverflow.com/questions/38738835/generating-gray-codes
+        output = []
+        n = int(k)
+        for i in range(0, 1 << n):
+            gray = i^(i >> 1)
+            output.append("{0:0{1}b}".format(gray, n))
+        return output
+    
 
     def estimate_channel(self, df_wrangled, N_pilot, noise_power, estimator='least_squares'):       
         # Note that Tr(H_hat) == N_t -- Check MIMO
@@ -710,7 +726,6 @@ constellation, H = mlw.create_channel(N_t=N_t, N_r=N_r, fading='Rayleigh', QAM_m
                    large_scale_gain=G)
 df = mlw.construct_data(constellation)
 df, X_true, n = mlw.wrangle_data(df)
-
 #######################################
 # Question: how does the LS and linear regression perform for a given pilot?
 mse_LS = []

@@ -68,12 +68,14 @@ class Utils:
         plt.close(fig)
         
         
-    def plotXY_comparison(self, x, y1, y2, xlabel, y1label, y2label, logx=False, logy=False, title=None):    
+    def plotXY_comparison(self, x, y1, y2, y3, xlabel, y1label, y2label, y3label, logx=False, logy=False, title=None):    
         fig = plt.figure(figsize=(8, 5))
         ax = fig.add_subplot(111)
 
         plt.plot(x, y1, lw=1.5, c='black', marker='*', label=y1label)
-        plt.plot(x, y2, lw=1.5, c='red', marker='*', label=y2label)
+        plt.plot(x, y2, lw=1.5, c='red', marker='+', label=y2label)
+        plt.plot(x, y3, lw=1.5, c='blue', marker='^', label=y3label)
+        
         plt.grid(which='both', linestyle='--')
         
         plt.legend(bbox_to_anchor=(0.05, -0.02, 0.9, 1), bbox_transform=fig.transFigure, 
