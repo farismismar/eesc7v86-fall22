@@ -74,7 +74,9 @@ class Utils:
 
         plt.plot(x, y1, lw=1.5, c='black', marker='*', label=y1label)
         plt.plot(x, y2, lw=1.5, c='red', marker='+', label=y2label)
-        plt.plot(x, y3, lw=1.5, c='blue', marker='^', label=y3label)
+        
+        if y3 is not None:
+            plt.plot(x, y3, lw=1.5, c='blue', marker='^', label=y3label)
         
         plt.grid(which='both', linestyle='--')
         

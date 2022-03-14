@@ -563,18 +563,18 @@ class MachineLearningWireless:
             df_SERs = pd.concat([df_SERs, error], axis=1)
         
         df_average_SER = df_SERs.mean(axis=0)
-        
-        # TODO: find the symbol error for all modulation types
+        new_columns = [c.replace('SER', 'BER') for c in df_SERs.columns]
+
         if modulation_order == 4:
-            new_columns = [c.replace('SER', 'BER') for c in df_SERs.columns]
             df_BERs = df_SERs.applymap(lambda x: 1 - np.sqrt(1 - x))
-            df_BERs.columns = new_columns
-            df_average_BER = df_BERs.mean(axis=0)
-            return df_average_SER, df_SERs, df_average_BER, df_BERs
+
         else:
-            print(f'CRITICAL: Modulation order {modulation_order} not done yet.  Code needed to solve a polynomial.')
-                    
-        return df_average_SER, df_SERs, None, None
+            print('INFORMATION: Assuming all symbols are Gray coded and high-SNR regime.')
+            df_BERs = df_SERs / np.log2(modulation_order)
+            
+        df_BERs.columns = new_columns
+        df_average_BER = df_BERs.mean(axis=0)
+        return df_average_SER, df_SERs, df_average_BER, df_BERs
     
     
     def maxlikelihood_detection(self, df, constellation, method='distance'):
@@ -710,9 +710,10 @@ class MachineLearningWireless:
     
 ## Simulation parameters ###########
 noise_power = 0.1 # in Watts
-N_t = 2
-N_r = 2
+N_t = 1
+N_r = 1
 N_symbols = 1024
+qam_modulation_M = 4
 seed = 0
 G = 1 # linear of large scale gain
 myUtils = Utils(seed=seed)
@@ -721,7 +722,7 @@ myUtils = Utils(seed=seed)
 mlw = MachineLearningWireless(random_state=seed, prefer_gpu=True)
 
 mlw.set_simulation_duration(N_symbols=N_symbols)
-constellation, H = mlw.create_channel(N_t=N_t, N_r=N_r, fading='Rayleigh', QAM_modulation=4,
+constellation, H = mlw.create_channel(N_t=N_t, N_r=N_r, fading='Rayleigh', QAM_modulation=qam_modulation_M,
                    noise_variance=noise_power, 
                    large_scale_gain=G)
 df = mlw.construct_data(constellation)
@@ -833,8 +834,8 @@ for t in train_sizes:
     accuracy_dnn.append(average_accuracy_dnn)
 
 # TODO: seems that XGBoost is better than DNN.  Why?
-myUtils.plotXY_comparison(x=train_sizes * N_symbols, y1=accuracy_ensemble, y2=accuracy_dnn,
-                          xlabel='Pilot size [syms]', y1label='Ensemble', y2label='DNN',
+myUtils.plotXY_comparison(x=train_sizes * N_symbols, y1=accuracy_ensemble, y2=accuracy_dnn, y3=None,
+                          xlabel='Pilot size [syms]', y1label='Ensemble', y2label='DNN', y3label=None,
                           title='Ensemble vs DNN Symbol Detection Accuracy')
 
 # Add more plots LS, MMSE, DNN, and XGBoost
