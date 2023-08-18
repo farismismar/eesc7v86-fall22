@@ -373,6 +373,36 @@ class Utils:
         self.low_threshold = low_threshold
                 
         return self
+
+    # Only create probability density and cumulative distribution functions, without plotting.
+    # Need to update the rest of the flie later 8/18/2023.
+    def create_cdf(self, X, num_bins=200):
+        X_ = X[~np.isnan(X)]
+        
+        counts, bin_edges = np.histogram(X_, bins=num_bins, density=True)
+        cdf = np.cumsum(counts) / counts.sum()
+        bin_edges = np.insert(bin_edges, 0, bin_edges[0] - (bin_edges[2] - bin_edges[1]))
+
+        return bin_edges[2:], cdf
+    
+    def create_ccdf(self, X, num_bins=200):
+        X_ = X[~np.isnan(X)]
+        
+        counts, bin_edges = np.histogram(X_, bins=num_bins, density=True)
+        ccdf = 1 - np.cumsum(counts) / counts.sum()
+        ccdf = np.insert(ccdf, 0, 1)
+        bin_edges = np.insert(bin_edges[1:], 0, bin_edges[0] - (bin_edges[2] - bin_edges[1]))
+
+        return bin_edges, ccdf
+    
+    def create_pdf(self, X, num_bins=200):
+        X_ = X[~np.isnan(X)]
+        
+        counts, bin_edges = np.histogram(X_, bins=num_bins, density=True)
+        pdf = counts / counts.sum()
+        bin_edges = np.insert(bin_edges, 0, bin_edges[0] - (bin_edges[2] - bin_edges[1]))
+        
+        return bin_edges, pdf
     
     # Latest since Feb 10, 2022
     def algorithm1(self, df_input, x_label, y_label, order=2, bin_size=2, burnoff=None):
