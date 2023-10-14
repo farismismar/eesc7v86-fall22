@@ -239,7 +239,7 @@ def run_simulation(n_transmissions, codeword_size, h, k_QPSK, sigmas, crc_polyno
 
 
 # 1) Create a channel
-h = create_rayleigh_channel(length=(crc_length + transmission_size))
+h = create_rayleigh_channel(length=(crc_length + codeword_size) // k_QPSK)
 
 # 2) Run the simulation on this channel
 df_output = run_simulation(n_transmissions, codeword_size, h, k_QPSK, 
