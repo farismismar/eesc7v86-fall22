@@ -10,12 +10,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import pdb
 
+# System parameters
 seed = 7
-
-np_random = np.random.RandomState(seed=seed)
-
 codeword_size = 16 # bits
-transmission_size = 500 * codeword_size
+transmission_size = 750 * codeword_size
 k_QPSK = 2
 
 # Note that the polynomial size is equal to the codeword size.
@@ -23,6 +21,10 @@ crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 n_transmissions = transmission_size // codeword_size
 
+sigmas = np.sqrt(np.logspace(-4, 3)) # square root of noise power
+##################
+
+np_random = np.random.RandomState(seed=seed)
 
 def create_constellation(M):
     centroids = pd.DataFrame(columns=['m', 'x_I', 'x_Q'])
@@ -31,7 +33,9 @@ def create_constellation(M):
         centroid_ = pd.DataFrame(data={'m': m,
                                        'x_I': np.sqrt(1 / 2) * np.cos(2*np.pi/M*m + np.pi/M),
                                        'x_Q': np.sqrt(1 / 2) * np.sin(2*np.pi/M*m + np.pi/M)}, index=[m])
-        
+        if centroids.shape[0] == 0:
+            centroids = centroid_.copy()
+            
         centroids = pd.concat([centroids, centroid_], ignore_index=True)
     
     # Normalize the transmitted symbols
@@ -100,12 +104,20 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def transmit(n_transmissions, codeword_size, alphabet, k, noise_power, crc_polynomial, crc_length):
+def create_rayleigh_channel(length):
+    G = 1 # large scale fading constant
+    # Rayleigh fading
+    h = np.sqrt(G / 2) * (np_random.normal(0, 1, size=length) + \
+                          1j * np_random.normal(0, 1, size=length))
+
+    return h
+
+
+def transmit(n_transmissions, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
     SERs = []
     BERs = []
     block_error = 0
     
-    G = 1 # large scale fading constant
     B = 15e3 # subcarrier in Hz
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
     Tx_SNR = 10*np.log10(Es / noise_power)
@@ -130,10 +142,7 @@ def transmit(n_transmissions, codeword_size, alphabet, k, noise_power, crc_polyn
         # Additive noise
         n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=len(x_sym_crc)) + \
             1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=len(x_sym_crc)) 
-        
-        # Rayleigh fading
-        h = np.sqrt(G / 2) * (np_random.normal(0, 1, size=len(x_sym_crc)) + \
-                            1j * np_random.normal(0, 1, size=len(x_sym_crc)))
+    
         # Channel
         y = h*x_sym_crc + n
     
@@ -194,7 +203,8 @@ def generate_plot(df, xlabel, ylabel):
     
     fig, ax = plt.subplots(figsize=(9,6))
     ax.set_xscale('log')
-    plt.plot(df_plot[xlabel], df_plot[ylabel], '--bo', alpha=0.7, markeredgecolor='k', markerfacecolor='r', markersize=8)
+    plt.plot(df_plot[xlabel].values, df_plot[ylabel].values, '--bo', alpha=0.7, 
+             markeredgecolor='k', markerfacecolor='r', markersize=6)
     plt.grid()
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
@@ -202,29 +212,43 @@ def generate_plot(df, xlabel, ylabel):
     plt.show()
     plt.close(fig)
     
-    
-alphabet = create_constellation(M=4)
-sigmas = np.sqrt(np.logspace(-4, 3)) # square root of noise power
 
-df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
-
-for sigma in sigmas:
-    SER_i, BER_i, BLER_i, _, Rx_EbN0_i = transmit(n_transmissions, codeword_size, alphabet, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
-    df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
-    df_output_['Avg_BER'] = BER_i
-    df_output_['noise_power'] = sigma ** 2
-    df_output_['BLER'] = BLER_i
-    df_output_['Rx_EbN0'] = Rx_EbN0_i
-    df_output = pd.concat([df_output_, df_output], axis=0, ignore_index=True)
+def run_simulation(n_transmissions, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length):    
+    alphabet = create_constellation(M=int(2 ** k_QPSK))
     
-    print(f'Block error rate: {BLER_i:.4f}.')
-    print('Average symbol error rate: {:.4f}.'.format(np.mean(SER_i)))
-    print('Average bit error rate: {:.4f}.'.format(np.mean(BER_i)))
+    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
 
-    
+    for sigma in sigmas:
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i = transmit(n_transmissions, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
+        df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
+        df_output_['Avg_BER'] = BER_i
+        df_output_['noise_power'] = sigma ** 2
+        df_output_['BLER'] = BLER_i
+        df_output_['Rx_EbN0'] = Rx_EbN0_i
+        
+        if df_output.shape[0] == 0:
+            df_output = df_output_.copy()
+            
+        df_output = pd.concat([df_output_, df_output], axis=0, ignore_index=True)
+        
+        print(f'Block error rate: {BLER_i:.4f}.')
+        print('Average symbol error rate: {:.4f}.'.format(np.mean(SER_i)))
+        print('Average bit error rate: {:.4f}.'.format(np.mean(BER_i)))
+
+    return df_output
+
+
+# 1) Create a channel
+h = create_rayleigh_channel(length=(crc_length + transmission_size))
+
+# 2) Run the simulation on this channel
+df_output = run_simulation(n_transmissions, codeword_size, h, k_QPSK, 
+                           sigmas, crc_polynomial, crc_length)
 df_output.to_csv('output.csv', index=False)
 
-xlabel = 'Rx_EbN0'
-ylabel = 'Avg_BER'
+# 3) Generate plot
+xlabel = 'noise_power'
+ylabel = 'Avg_SER'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
+#############
