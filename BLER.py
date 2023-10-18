@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+	# -*- coding: utf-8 -*-
 """
 Created on Thu Oct 12 16:19:40 2023
 
@@ -7,13 +7,15 @@ Created on Thu Oct 12 16:19:40 2023
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import pdb
+import matplotlib.pyplot as plt
+
+file_name = 'faris.bmp'
 
 # System parameters
 seed = 7
 codeword_size = 16 # bits
-transmission_size = 750 * codeword_size
+transmission_size = 200 * codeword_size
 k_QPSK = 2
 
 # Note that the polynomial size is equal to the codeword size.
@@ -35,8 +37,8 @@ def create_constellation(M):
                                        'x_Q': np.sqrt(1 / 2) * np.sin(2*np.pi/M*m + np.pi/M)}, index=[m])
         if centroids.shape[0] == 0:
             centroids = centroid_.copy()
-            
-        centroids = pd.concat([centroids, centroid_], ignore_index=True)
+        else:
+            centroids = pd.concat([centroids, centroid_], ignore_index=True)
     
     # Normalize the transmitted symbols
     signal_power = np.mean(centroids['x_I'] ** 2 + centroids['x_Q'] ** 2)
@@ -68,7 +70,24 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
         for i, q in zip(x_b_i, x_b_q):
             x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
         return x_b_i, x_b_q, ''.join(x_bits)
-  
+
+
+def bits_to_symbols(x_b, alphabet, k):
+    iter_ct = int(np.ceil(len(x_b) / k))
+
+    df_ = alphabet[['m', 'I', 'Q']].replace(-1, 0).astype(int)
+    df_['IQ'] = df_['I'].astype(str) + df_['Q'].astype(str)
+    
+    x_sym = []
+    for i in range(iter_ct - 1):
+        bits_i = x_b[i*k:(i+1)*k] # read the next ith stride of k bits
+        # Convert this to symbol from alphabet
+        sym_i = df_.loc[df_['IQ'] == bits_i, 'm'].values[0].astype(int)
+        # print(bits_i, sym_i)
+        x_sym.append(sym_i)
+        
+    return np.array(x_sym)
+
 
 def add_crc(x_bits_orig, crc_polynomial, crc_length):
     # Introduce CRC to x
@@ -94,6 +113,15 @@ def bits_to_baseband(x_bits):
     return x_b_i, x_b_q, x_sym
 
 
+def create_rayleigh_channel(length):
+    G = 1 # large scale fading constant
+    # Rayleigh fading
+    h = np.sqrt(G / 2) * (np_random.normal(0, 1, size=length) + \
+                          1j * np_random.normal(0, 1, size=length))
+
+    return h
+
+
 def ML_detect_symbol(x_sym_hat, alphabet):
     # This function returns argmin |x - s_m| based on AWGN ML detection
     df = pd.DataFrame(data={0: abs(x_sym_hat - alphabet.loc[alphabet['m'] == 0, 'x'].values[0]),
@@ -104,21 +132,15 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def create_rayleigh_channel(length):
-    G = 1 # large scale fading constant
-    # Rayleigh fading
-    h = np.sqrt(G / 2) * (np_random.normal(0, 1, size=length) + \
-                          1j * np_random.normal(0, 1, size=length))
-
-    return h
-
-
-def transmit(n_transmissions, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
+def transmit(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
     SERs = []
     BERs = []
     block_error = 0
     
-    B = 15e3 # subcarrier in Hz
+    Df = 15e3 # subcarrier in Hz
+    Nsc = 1   # Number of subcarriers
+    B = Nsc * Df # Transmit bandwidth
+    
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
     Tx_SNR = 10*np.log10(Es / noise_power)
     
@@ -127,10 +149,15 @@ def transmit(n_transmissions, codeword_size, alphabet, h, k, noise_power, crc_po
     
     print(f'SNR at the transmitter: {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter: {Tx_EbN0:.4f} dB')
+    b = len(data)
+    n_transmissions = int(np.ceil(b / codeword_size))
+    x_info_complete = bits_to_symbols(data, alphabet, k) 
     
+    print(f'Transmitting a total of {b} bits.')
     Rx_EbN0 = []
-    for codeword in np.arange(n_transmissions):
-        x_info = np_random.choice(alphabet['m'], size=codeword_size // k)
+    for codeword in np.arange(n_transmissions - 1):
+        print('Transmitting codeword {codeword + 1}/{n_transmissions}')
+        x_info = x_info_complete[codeword*(codeword_size // k):(codeword+1)*(codeword_size // k)] #np_random.choice(alphabet['m'], size=codeword_size // k)
         x_bits_orig = symbols_to_bits(x_info, k, alphabet)
         x_bits_crc, _ = add_crc(x_bits_orig, crc_polynomial, crc_length)
         
@@ -195,6 +222,16 @@ def transmit(n_transmissions, codeword_size, alphabet, h, k, noise_power, crc_po
     return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0
 
 
+def read_bitmap(file):
+    # This is a 128x128 pixel image
+    im = plt.imread(file)
+    im = im.reshape(1, -1)[0]
+    im = [bin(a)[2:] for a in im]
+    im = ''.join(im) # This is now a string of bits
+
+    return im
+
+
 def generate_plot(df, xlabel, ylabel):
     df_plot = df_output.groupby('noise_power').mean().reset_index()
     
@@ -212,14 +249,14 @@ def generate_plot(df, xlabel, ylabel):
     plt.show()
     plt.close(fig)
     
-
-def run_simulation(n_transmissions, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length):    
+    
+def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length):
     alphabet = create_constellation(M=int(2 ** k_QPSK))
+    data = read_bitmap(file_name)
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
-
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i = transmit(n_transmissions, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i = transmit(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
@@ -228,8 +265,8 @@ def run_simulation(n_transmissions, codeword_size, h, k_QPSK, sigmas, crc_polyno
         
         if df_output.shape[0] == 0:
             df_output = df_output_.copy()
-            
-        df_output = pd.concat([df_output_, df_output], axis=0, ignore_index=True)
+        else:
+            df_output = pd.concat([df_output_, df_output], axis=0, ignore_index=True)
         
         print(f'Block error rate: {BLER_i:.4f}.')
         print('Average symbol error rate: {:.4f}.'.format(np.mean(SER_i)))
@@ -242,7 +279,7 @@ def run_simulation(n_transmissions, codeword_size, h, k_QPSK, sigmas, crc_polyno
 h = create_rayleigh_channel(length=(crc_length + codeword_size) // k_QPSK)
 
 # 2) Run the simulation on this channel
-df_output = run_simulation(n_transmissions, codeword_size, h, k_QPSK, 
+df_output = run_simulation(file_name, codeword_size, h, k_QPSK, 
                            sigmas, crc_polynomial, crc_length)
 df_output.to_csv('output.csv', index=False)
 
