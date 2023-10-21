@@ -15,15 +15,16 @@ file_name = 'faris.bmp'
 # System parameters
 seed = 7
 codeword_size = 16 # bits
-transmission_size = 200 * codeword_size
 k_QPSK = 2
+    
+plt.rcParams['font.family'] = "Arial"
+plt.rcParams['font.size'] = "14"
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
-n_transmissions = transmission_size // codeword_size
 
-sigmas = np.sqrt(np.logspace(-4, 3)) # square root of noise power
+sigmas = np.sqrt(np.logspace(-1, 3)) # square root of noise power
 ##################
 
 np_random = np.random.RandomState(seed=seed)
@@ -79,7 +80,7 @@ def bits_to_symbols(x_b, alphabet, k):
     df_['IQ'] = df_['I'].astype(str) + df_['Q'].astype(str)
     
     x_sym = []
-    for i in range(iter_ct - 1):
+    for i in range(iter_ct):
         bits_i = x_b[i*k:(i+1)*k] # read the next ith stride of k bits
         # Convert this to symbol from alphabet
         sym_i = df_.loc[df_['IQ'] == bits_i, 'm'].values[0].astype(int)
@@ -132,7 +133,7 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def transmit(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
+def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
     SERs = []
     BERs = []
     block_error = 0
@@ -151,14 +152,18 @@ def transmit(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, c
     print(f'EbN0 at the transmitter: {Tx_EbN0:.4f} dB')
     b = len(data)
     n_transmissions = int(np.ceil(b / codeword_size))
-    x_info_complete = bits_to_symbols(data, alphabet, k) 
+    x_info_complete = bits_to_symbols(data, alphabet, k)
+    
+    data_rx = []
     
     print(f'Transmitting a total of {b} bits.')
     Rx_EbN0 = []
-    for codeword in np.arange(n_transmissions - 1):
-        print('Transmitting codeword {codeword + 1}/{n_transmissions}')
+    for codeword in np.arange(n_transmissions):
+        print(f'Transmitting codeword {codeword + 1}/{n_transmissions - 1}')
         x_info = x_info_complete[codeword*(codeword_size // k):(codeword+1)*(codeword_size // k)] #np_random.choice(alphabet['m'], size=codeword_size // k)
         x_bits_orig = symbols_to_bits(x_info, k, alphabet)
+        # Padding with zeros
+        x_bits_orig = x_bits_orig.zfill(codeword_size)
         x_bits_crc, _ = add_crc(x_bits_orig, crc_polynomial, crc_length)
         
         assert(len(x_bits_crc) == crc_length + codeword_size)
@@ -202,7 +207,7 @@ def transmit(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, c
         
         ########################################################
         # Symbol ML detection
-        x_info_hat = ML_detect_symbol(x_sym_hat, alphabet) 
+        x_info_hat = ML_detect_symbol(x_sym_hat, alphabet)
         
         ########################################################
         
@@ -210,34 +215,71 @@ def transmit(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, c
         symbol_error = 1 - np.mean(x_info_hat == x_info)
         SERs.append(symbol_error)
         
-        x_hat_b_i, x_hat_b_q, _ = symbols_to_bits(x_sym_hat, k, alphabet, is_complex=True)
+        x_hat_b_i, x_hat_b_q, x_hat_b = symbols_to_bits(x_sym_hat, k, alphabet, is_complex=True)
         ber_i = 1 - np.mean(x_hat_b_i == x_b_i[:-crc_length // 2])
         ber_q = 1 - np.mean(x_hat_b_q == x_b_q[:-crc_length // 2])
+        
+        data_rx.append(x_hat_b)
         ber = np.mean([ber_i, ber_q])
         BERs.append(ber)
         # for
         
     BLER = block_error / n_transmissions
 
-    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0
+    pdb.set_trace()
+    data_rx_ = [np.array([d[:8], d[-8:]]) for d in data_rx]
+    data_rx_ = np.array(data_rx_).flatten()
+    data_rx_ = ''.join(data_rx_)
+    
+    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_
 
 
 def read_bitmap(file):
     # This is a 128x128 pixel image
-    im = plt.imread(file)
-    im = im.reshape(1, -1)[0]
-    im = [bin(a)[2:] for a in im]
+    im_orig = plt.imread(file)
+    #im_orig = im_orig[:32, :32, :]  # 32x32x3
+    
+    im = im_orig.reshape(1, -1)[0]
+    im = [bin(a)[2:].zfill(8) for a in im]
     im = ''.join(im) # This is now a string of bits
-
+    
     return im
 
 
+def _convert_to_bytes_decimal(data):
+    n = len(data) // 8
+    dim = int(np.sqrt(n / 3))
+    
+    data_vector = []
+    for i in range(n):
+        d = str(data[i*8:(i+1)*8])
+        d = int(d, 2)
+        # print(d)
+        data_vector.append(d)
+    
+    data_vector = np.array(data_vector, dtype='uint8')
+    data_vector = data_vector.reshape(dim, dim, 3)
+    
+    return data_vector
+
+
+def plot_bitmaps(data1, data2):
+    fig, [ax1, ax2] = plt.subplots(nrows=1, ncols=2)
+    
+    ax1.imshow(_convert_to_bytes_decimal(data1))
+    ax2.imshow(_convert_to_bytes_decimal(data2))
+    
+    ax1.axis('off')
+    ax2.axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+    plt.close(fig)
+    
+    
 def generate_plot(df, xlabel, ylabel):
     df_plot = df_output.groupby('noise_power').mean().reset_index()
-    
-    plt.rcParams['font.family'] = "Arial"
-    plt.rcParams['font.size'] = "14"
-    
+
     fig, ax = plt.subplots(figsize=(9,6))
     ax.set_xscale('log')
     plt.plot(df_plot[xlabel].values, df_plot[ylabel].values, '--bo', alpha=0.7, 
@@ -254,14 +296,19 @@ def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, 
     alphabet = create_constellation(M=int(2 ** k_QPSK))
     data = read_bitmap(file_name)
     
+    pdb.set_trace()
+    plot_bitmaps(data, data)
+    
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i = transmit(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
         df_output_['BLER'] = BLER_i
         df_output_['Rx_EbN0'] = Rx_EbN0_i
+        
+        plot_bitmaps(data, data_received)
         
         if df_output.shape[0] == 0:
             df_output = df_output_.copy()
@@ -285,7 +332,10 @@ df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
 xlabel = 'noise_power'
-ylabel = 'Avg_SER'
+ylabel = 'BLER'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
 #############
+
+# Check this
+# https://hific.github.io/
