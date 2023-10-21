@@ -133,13 +133,21 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
+def _estimate_channel(y, n):
+    h = 1
+    return h
+
+
 def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
     SERs = []
     BERs = []
     block_error = 0
     
     Df = 15e3 # subcarrier in Hz
-    Nsc = 1   # Number of subcarriers
+    
+    # TODO: Find the correct number of subcarriers required
+    # per TTI, simply from codeword_size
+    Nsc = 1 # np.ceil(len(data) / codeword_size)    # Number of subcarriers
     B = Nsc * Df # Transmit bandwidth
     
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
@@ -179,7 +187,7 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
         y = h*x_sym_crc + n
     
         # Channel estimation from the received signal
-        h_hat = h
+        h_hat = _estimate_channel(y, n)
         
         # Channel equalization using matched filter
         w = np.conjugate(h_hat) / (np.abs(h_hat) ** 2)
@@ -226,7 +234,6 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
         
     BLER = block_error / n_transmissions
 
-    pdb.set_trace()
     data_rx_ = [np.array([d[:8], d[-8:]]) for d in data_rx]
     data_rx_ = np.array(data_rx_).flatten()
     data_rx_ = ''.join(data_rx_)
@@ -235,7 +242,7 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
 
 
 def read_bitmap(file):
-    # This is a 128x128 pixel image
+    # This is a 32x32 pixel image
     im_orig = plt.imread(file)
     #im_orig = im_orig[:32, :32, :]  # 32x32x3
     
@@ -295,8 +302,7 @@ def generate_plot(df, xlabel, ylabel):
 def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length):
     alphabet = create_constellation(M=int(2 ** k_QPSK))
     data = read_bitmap(file_name)
-    
-    pdb.set_trace()
+
     plot_bitmaps(data, data)
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
