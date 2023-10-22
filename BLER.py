@@ -16,7 +16,8 @@ file_name = 'faris.bmp'
 seed = 7
 codeword_size = 16 # bits
 k_QPSK = 2
-    
+n_pilot = 4
+
 plt.rcParams['font.family'] = "Arial"
 plt.rcParams['font.size'] = "14"
 
@@ -133,22 +134,26 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def _estimate_channel(y, n):
+def _estimate_channel(x_pilot, y_pilot):
     h = 1
     return h
 
 
-def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length):
+def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length, n_pilot):
     SERs = []
     BERs = []
     block_error = 0
     
     Df = 15e3 # subcarrier in Hz
+    tti = 1e-3 # in seconds
+    bit_rate = codeword_size / tti
+    print(f'Transmission rate = {bit_rate:.2f} bps')
     
-    # TODO: Find the correct number of subcarriers required
-    # per TTI, simply from codeword_size
-    Nsc = 1 # np.ceil(len(data) / codeword_size)    # Number of subcarriers
+    # Find the correct number of subcarriers required for this bit rate
+    # assuming 1:1 code rate.
+    Nsc = np.ceil(bit_rate / (k * Df))    # Number of subcarriers
     B = Nsc * Df # Transmit bandwidth
+    print(f'Transmission BW = {B:.2f} Hz')
     
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
     Tx_SNR = 10*np.log10(Es / noise_power)
@@ -167,7 +172,7 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
     print(f'Transmitting a total of {b} bits.')
     Rx_EbN0 = []
     for codeword in np.arange(n_transmissions):
-        print(f'Transmitting codeword {codeword + 1}/{n_transmissions - 1}')
+        print(f'Transmitting codeword {codeword + 1}/{n_transmissions}')
         x_info = x_info_complete[codeword*(codeword_size // k):(codeword+1)*(codeword_size // k)] #np_random.choice(alphabet['m'], size=codeword_size // k)
         x_bits_orig = symbols_to_bits(x_info, k, alphabet)
         # Padding with zeros
@@ -186,8 +191,12 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
         # Channel
         y = h*x_sym_crc + n
     
+        # Extract the pilot
+        x_p = x_sym_crc[:n_pilot]
+        y_p = y[:n_pilot]
+        
         # Channel estimation from the received signal
-        h_hat = _estimate_channel(y, n)
+        h_hat = _estimate_channel(x_p, y_p)
         
         # Channel equalization using matched filter
         w = np.conjugate(h_hat) / (np.abs(h_hat) ** 2)
@@ -265,6 +274,10 @@ def _convert_to_bytes_decimal(data):
         data_vector.append(d)
     
     data_vector = np.array(data_vector, dtype='uint8')
+    # Truncate if needed
+    data_vector = data_vector[:dim * dim * 3]
+
+    # Now reshape
     data_vector = data_vector.reshape(dim, dim, 3)
     
     return data_vector
@@ -299,7 +312,7 @@ def generate_plot(df, xlabel, ylabel):
     plt.close(fig)
     
     
-def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length):
+def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length, n_pilot):
     alphabet = create_constellation(M=int(2 ** k_QPSK))
     data = read_bitmap(file_name)
 
@@ -307,7 +320,7 @@ def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, 
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length, n_pilot)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
@@ -333,7 +346,7 @@ h = create_rayleigh_channel(length=(crc_length + codeword_size) // k_QPSK)
 
 # 2) Run the simulation on this channel
 df_output = run_simulation(file_name, codeword_size, h, k_QPSK, 
-                           sigmas, crc_polynomial, crc_length)
+                           sigmas, crc_polynomial, crc_length, n_pilot)
 df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
