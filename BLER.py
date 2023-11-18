@@ -5,11 +5,22 @@ Created on Thu Oct 12 16:19:40 2023
 @author: farismismar
 """
 
+import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+if os.name == 'nt':
+    os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
+
+import tensorflow as tf
+print(tf.config.list_physical_devices('GPU'))
+
+# The GPU ID to use, usually either "0" or "1" based on previous line.
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 import numpy as np
 import pandas as pd
 import pdb
 import matplotlib.pyplot as plt
-
+from keras import backend as K
 file_name = 'faris.bmp'
 
 # System parameters
@@ -30,6 +41,7 @@ sigmas = np.sqrt(np.logspace(-1, 3)) # square root of noise power
 
 np_random = np.random.RandomState(seed=seed)
 
+# Constellation based on Gray code
 def create_constellation(M):
     centroids = pd.DataFrame(columns=['m', 'x_I', 'x_Q'])
 
@@ -135,8 +147,82 @@ def ML_detect_symbol(x_sym_hat, alphabet):
 
 
 def _estimate_channel(x_pilot, y_pilot):
-    h = 1
-    return h
+    # For simplicity let's use LS estimation
+    #h_ls = y_pilot / np.matmul(x_pilot, x_pilot.conjugate())
+    h_ls = y_pilot / x_pilot
+
+    return h_ls
+
+
+def _cplex_mse(y_true, y_pred):
+    y_true = K.cast(y_true, tf.complex64) 
+    y_pred = K.cast(y_pred, tf.complex64) 
+    y_true = tf.reshape(y_true, [1, -1])
+    y_pred = tf.reshape(y_pred, [1, -1])
+    return K.mean(K.square(K.abs(y_true - y_pred)))
+    
+
+def _compress_channel(h, compression_ratio, epochs=10, batch_size=16, 
+                      training_split=0.5):
+    from gan_inversion import Autoencoder
+    global seed
+    
+    # Let us try to reshape h to H
+    N_t, N_r = 2, 2
+    H = h.reshape(N_r, N_t)
+    
+    # Normalize the channel such that the sq Frobenius norm is N_t N_r  
+    H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)    
+    
+    latent_dim = H.shape[1]
+    
+    compressed_latent_dim = int((1 - compression_ratio) * latent_dim)
+    training_size = int(training_split * H.shape[0])
+    
+    autoencoder_re = Autoencoder(compressed_latent_dim, 
+                              shape=H.shape[1:], seed=seed)
+    autoencoder_re.compile(optimizer='adam', loss=_cplex_mse)
+    
+    # For the encoder to learn to compress, pass x_train as an input and target
+    # Decoder will learn how to reconstruct original 
+    x_train = np.real(H[:training_size, 1])
+    x_test = np.real(H[training_size:, 1])
+    
+    history_re = autoencoder_re.fit(x_train, x_train,
+                    epochs=epochs, batch_size=batch_size,
+                    shuffle=True,
+                    validation_data=(x_test, x_test))
+    
+    # Encoded samples are compressed and the latent vector has a lower
+    # dimension as the result of compression.
+    h_re_compressed = autoencoder_re.encoder.predict(x_test)
+    
+    # Decoder tries to reconstruct the true signal
+    h_re_reconstructed = autoencoder_re.decoder.predict(h_re_compressed)
+    
+    # Repeat but for imaginary part.  See p6 https://arxiv.org/pdf/1905.03761.pdf
+    autoencoder_im = Autoencoder(compressed_latent_dim, 
+                              shape=H.shape[1:], seed=seed)
+    autoencoder_im.compile(optimizer='adam', loss=_cplex_mse)
+    
+    x_train = np.imag(H[:training_size, 1])
+    x_test = np.imag(H[training_size:, 1])
+    
+    history_im = autoencoder_im.fit(x_train, x_train,
+                    epochs=epochs, batch_size=batch_size,
+                    shuffle=True,
+                    validation_data=(x_test, x_test))
+    h_im_compressed = autoencoder_im.encoder.predict(x_test)
+    h_im_reconstructed = autoencoder_im.decoder.predict(h_im_compressed)
+
+    h_compressed = h_re_compressed + 1j * h_im_compressed
+    h_reconstructed = h_re_reconstructed + 1j * h_im_reconstructed
+    del h_re_compressed, h_im_compressed
+    del h_re_reconstructed, h_im_reconstructed
+    
+    error = _cplex_mse(H[training_size:, :], h_reconstructed)
+    
+    return h_compressed, h_reconstructed, error.numpy()
 
 
 def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length, n_pilot):
@@ -197,10 +283,18 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
         
         # Channel estimation from the received signal
         h_hat = _estimate_channel(x_p, y_p)
+        error_vector = h[:n_pilot] - h_hat
+        
+        channel_estimation_mse = np.linalg.norm(np.abs(error_vector) ** 2, 2) / n_pilot
+        print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
+        
+        # Now compress h_hat
+        h_compress, h_reconstructed, comp_channel_error = _compress_channel(h_hat, compression_ratio=0)
         
         # Channel equalization using matched filter
-        w = np.conjugate(h_hat) / (np.abs(h_hat) ** 2)
-        x_sym_crc_hat = w * y
+        w = np.conjugate(h_reconstructed) / (np.abs(h_reconstructed) ** 2)
+
+        x_sym_crc_hat = w[0,0] * y
         
         # Back to bits
         _, _, x_bits_crc_hat = symbols_to_bits(x_sym_crc_hat, k, alphabet,
@@ -247,7 +341,7 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
     data_rx_ = np.array(data_rx_).flatten()
     data_rx_ = ''.join(data_rx_)
     
-    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_
+    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_, comp_channel_error
 
 
 def read_bitmap(file):
@@ -318,14 +412,15 @@ def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, 
 
     plot_bitmaps(data, data)
     
-    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
+    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER', 'Channel_Error'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length, n_pilot)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length, n_pilot)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
         df_output_['BLER'] = BLER_i
         df_output_['Rx_EbN0'] = Rx_EbN0_i
+        df_output_['Channel_Error'] = chan_err_comp
         
         plot_bitmaps(data, data_received)
         
@@ -350,11 +445,7 @@ df_output = run_simulation(file_name, codeword_size, h, k_QPSK,
 df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
-xlabel = 'noise_power'
-ylabel = 'BLER'
+xlabel = 'BLER'
+ylabel = 'Rx_EbN0'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
-#############
-
-# Check this
-# https://hific.github.io/
