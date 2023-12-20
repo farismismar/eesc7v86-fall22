@@ -21,13 +21,19 @@ import pandas as pd
 import pdb
 import matplotlib.pyplot as plt
 from keras import backend as K
+from scipy.linalg import hankel
+
 file_name = 'faris.bmp'
 
 # System parameters
+constellation = 'QAM'
+M_constellation = 64
 seed = 7
 codeword_size = 16 # bits
-k_QPSK = 2
+k_constellation = int(np.log2(M_constellation))
 n_pilot = 4
+N_r = 2
+N_t = 2
 
 plt.rcParams['font.family'] = "Arial"
 plt.rcParams['font.size'] = "14"
@@ -36,17 +42,32 @@ plt.rcParams['font.size'] = "14"
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-1, 3)) # square root of noise power
+sigmas = np.sqrt(np.logspace(-1, 3, num=8)) # square root of noise power
 ##################
 
 np_random = np.random.RandomState(seed=seed)
 
+def create_constellation(constellation, M):
+    if (constellation == 'QPSK'):
+        return create_constellation_psk(M)
+    elif (constellation == 'QAM'):
+        return create_constellation_qam(M)
+    else:
+        return None
+     
 # Constellation based on Gray code
-def create_constellation(M):
+# OK
+def create_constellation_psk(M):
+    k = np.log2(M)
+    if k != int(k): # only square constellations are allowed.
+        print('Only square PSK constellations allowed.')
+        return None
+
+    k = int(k)
     centroids = pd.DataFrame(columns=['m', 'x_I', 'x_Q'])
 
     for m in np.arange(M):
-        centroid_ = pd.DataFrame(data={'m': m,
+        centroid_ = pd.DataFrame(data={'m': int(m),
                                        'x_I': np.sqrt(1 / 2) * np.cos(2*np.pi/M*m + np.pi/M),
                                        'x_Q': np.sqrt(1 / 2) * np.sin(2*np.pi/M*m + np.pi/M)}, index=[m])
         if centroids.shape[0] == 0:
@@ -55,42 +76,101 @@ def create_constellation(M):
             centroids = pd.concat([centroids, centroid_], ignore_index=True)
     
     # Normalize the transmitted symbols
-    signal_power = np.mean(centroids['x_I'] ** 2 + centroids['x_Q'] ** 2)
+    signal_power = np.sum(centroids['x_I'] ** 2 + centroids['x_Q'] ** 2) / M
 
-    centroids.iloc[:, 1:] /= np.sqrt(signal_power)
-    
-    centroids.loc[:, 'm'] = centroids.loc[:, 'm'].astype(int)
+    centroids[['x_I', 'x_Q']] /= np.sqrt(signal_power)
     centroids.loc[:, 'x'] = centroids.loc[:, 'x_I'] + 1j * centroids.loc[:, 'x_Q']
     
-    centroids['I'] = np.sign(centroids['x_I'])
-    centroids['Q'] = np.sign(centroids['x_Q'])
+    gray = centroids['m'].apply(lambda x: decimal_to_gray(x, k))
+    centroids['I'] = gray.str[:(k//2)]
+    centroids['Q'] = gray.str[(k//2):]
     
     return centroids
 
 
-def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
-    if is_complex == False:
-        x_bits = ''
-        for s in x_sym:
-            i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
-            x_bits += '{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)).zfill(k)
-            
-        return x_bits
-    else:
-        x_b_i = np.sign(np.real(x_sym))
-        x_b_q = np.sign(np.imag(x_sym))
+# Constellation based on Gray code
+def create_constellation_qam(M):
+    k = np.log2(M)
+    if k != int(k): # only square QAM is allowed.
+        print('Only square QAM constellations allowed.')
+        return None
 
-        x_bits = []
-        for i, q in zip(x_b_i, x_b_q):
-            x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
-        return x_b_i, x_b_q, ''.join(x_bits)
+    k = int(k)
+    m = np.arange(M)
+    Am_ = np.arange(-np.sqrt(M) + 1, np.sqrt(M), step=2, dtype=int) # Proakis p105
+    
+    Am = np.zeros(M, dtype=np.complex64)
+    idx = 0
+    for Am_I in Am_:
+        for Am_Q in Am_:
+            Am[idx] = Am_I + 1j * Am_Q
+            idx += 1
+    
+    # This will hold the transmitted symbols
+    constellation = pd.DataFrame(data={'x_I': np.real(Am),
+                                       'x_Q': np.imag(Am)})
+    constellation.insert(0, 'm', m)
+    constellation_ordered = pd.DataFrame()
+    for idx, s in enumerate(np.array_split(constellation, int(np.sqrt(M)))):
+        if idx % 2 == 1:
+            s = s.iloc[::-1] # Invert 
+        # print(s)
+        constellation_ordered = pd.concat([constellation_ordered, s], axis=0)
+    
+    constellation = constellation_ordered.copy()
+    constellation = constellation.reset_index(drop=True)
+    constellation['m'] = constellation.index
+    
+    gray = constellation['m'].apply(lambda x: decimal_to_gray(x, k))
+    constellation['I'] = gray.str[:(k//2)]
+    constellation['Q'] = gray.str[(k//2):]
+    
+    # Normalize the transmitted symbols
+    signal_power = np.sum(constellation['x_I'] ** 2 + \
+                           constellation['x_Q'] ** 2) / M
+    
+    constellation[['x_I', 'x_Q']] /= np.sqrt(signal_power)
+    constellation.loc[:, 'x'] = constellation.loc[:, 'x_I'] + 1j * constellation.loc[:, 'x_Q']
+    
+    return constellation
 
 
+def decimal_to_gray(n, k):
+    gray = n ^ (n >> 1)
+    gray = bin(gray)[2:]
+    
+    return '{}'.format(gray).zfill(k)
+
+
+def _plot_constellation(constellation):
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    plt.scatter(constellation['x_I'], constellation['x_Q'], c='k', marker='o', lw=2)
+    for idx, row in constellation.iterrows():
+        x, y = row[['x_I', 'x_Q']]
+        if y < 0:
+            yshift = -0.1
+        else:
+            yshift = 0.05
+        
+        ax.text(row['x_I'], row['x_Q'] + yshift, s='{}{}'.format(row['I'], row['Q']))
+        
+    plt.grid(True)
+    plt.xlabel('I')
+    plt.ylabel('Q')
+    plt.show()
+    plt.close(fig)
+    
+
+def _vec(A):
+    # A is numpy array
+    return A.flatten(order='F')
+
+    
 def bits_to_symbols(x_b, alphabet, k):
     iter_ct = int(np.ceil(len(x_b) / k))
-
-    df_ = alphabet[['m', 'I', 'Q']].replace(-1, 0).astype(int)
-    df_['IQ'] = df_['I'].astype(str) + df_['Q'].astype(str)
+    
+    df_ = alphabet[['m', 'I', 'Q']].copy()
+    df_.loc[:, 'IQ'] = df_['I'].astype(str) + df_['Q'].astype(str)
     
     x_sym = []
     for i in range(iter_ct):
@@ -103,37 +183,72 @@ def bits_to_symbols(x_b, alphabet, k):
     return np.array(x_sym)
 
 
-def add_crc(x_bits_orig, crc_polynomial, crc_length):
+# TODO: The next two functions are a bit off?
+def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
+    if is_complex == False:
+        x_bits = ''
+        for s in x_sym:
+            i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
+            x_bits += '{}{}'.format(i, q).zfill(k)
+        return x_bits
+# if is_complex == False:
+    #     x_streams = []
+    #     for stream in x_sym.T:
+    #         x_bits = ''
+    #         for s in stream:
+    #             i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
+    #             x_bits += '{}{}'.format(i, q).zfill(k)
+    #         x_streams.append(x_bits)
+    #     return x_streams
+    else:
+        pdb.set_trace()
+        x_b_i = np.sign(np.real(x_sym))
+        x_b_q = np.sign(np.imag(x_sym))
+
+        x_bits = []
+        for i, q in zip(x_b_i, x_b_q):
+            x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
+        return x_b_i, x_b_q, ''.join(x_bits)
+
+
+# This function is wrong.
+def bits_to_baseband(x_bits, alphabet, k):
+    x_b_i = []
+    x_b_q = []
+    for idx in range(len(x_bits) // k):
+        codeword = x_bits[idx*k:(idx+1)*k]
+        x_b_i.append(codeword[:(k//2)])
+        x_b_q.append(codeword[(k//2):])
+        
+    x_sym = []
+    # Next is baseband which is the complex valued symbols
+    for i, q in zip(x_b_i, x_b_q):
+        sym = alphabet.loc[(alphabet['I'] == i) & (alphabet['Q'] == q), 'x'].values[0]
+        x_sym.append(sym)
+        
+    x_sym = np.array(x_sym)
+    
+    return x_b_i, x_b_q, x_sym
+
+
+def compute_crc(x_bits_orig, crc_polynomial):
     # Introduce CRC to x
     crc = 0
     for position, value in enumerate(bin(crc_polynomial)[2:]):
         if value == '1':
             crc = crc ^ int(x_bits_orig[position])
+    crc = bin(crc)[2:]
     
-    crc = bin(crc)[2:].zfill(crc_length)
-    x_bits = x_bits_orig + crc
-    
-    return x_bits, crc
+    return crc
 
 
-def bits_to_baseband(x_bits):
-    x_b_i = []
-    x_b_q = []
-    for i, q in zip(x_bits[::2], x_bits[1::2]):
-        x_b_i.append(2*int(i) - 1)
-        x_b_q.append(2*int(q) - 1)
-    x_sym = (x_b_i + 1j * np.array(x_b_q)) / np.sqrt(2)
-    
-    return x_b_i, x_b_q, x_sym
-
-
-def create_rayleigh_channel(length):
+def create_rayleigh_channel(N_r, N_t):
     G = 1 # large scale fading constant
     # Rayleigh fading
-    h = np.sqrt(G / 2) * (np_random.normal(0, 1, size=length) + \
-                          1j * np_random.normal(0, 1, size=length))
+    H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
+                          1j * np_random.normal(0, 1, size=(N_r, N_t)))
 
-    return h
+    return H
 
 
 def ML_detect_symbol(x_sym_hat, alphabet):
@@ -146,12 +261,43 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def _estimate_channel(x_pilot, y_pilot):
-    # For simplicity let's use LS estimation
-    #h_ls = y_pilot / np.matmul(x_pilot, x_pilot.conjugate())
-    h_ls = y_pilot / x_pilot
+def _estimate_channel(x, y, n_pilot, N0=None):
+    # TODO:  This is not working.
+    pdb.set_trace()
+    N_t = x.shape[0]
+    N_r = y.shape[0]
+    
+    # Extract the pilot
+    max_pilot = y.shape[1]
+    if n_pilot > max_pilot:
+        n_pilot = max_pilot
+        
+    # This will have the estimate eventually.
+    H_hat_est = np.zeros((1,N_t))
+    
+    # Find the transmit and received symbols per antenna
+    for p in range(n_pilot): # in range(x_sym_crc.shape[0]):
+        x_p = x[:, p]#.reshape(N_t, 1)
+        y_p = y[:, p]#.reshape(N_r, 1)
+        h_ls_p = np.divide(y_p, x_p)
+        print(h_ls_p)
+        
+        H_hat_est = np.r_[H_hat_est, H_ls_p]
+      
+        h_ls
+      
+        
+      # h_ls_p[np.isinf(h_ls_p)] = np.nan
+        
+        
 
-    return h_ls
+    H_hat = np.nanmean(np.array(H_hat), axis=0)
+    
+    if N0 is not None:
+        # N0 is passed, use LMMSE
+        True
+        
+    return H_hat
 
 
 def _cplex_mse(y_true, y_pred):
@@ -162,14 +308,12 @@ def _cplex_mse(y_true, y_pred):
     return K.mean(K.square(K.abs(y_true - y_pred)))
     
 
-def _compress_channel(h, compression_ratio, epochs=10, batch_size=16, 
+def _compress_channel(H, compression_ratio, epochs=10, batch_size=16, 
                       training_split=0.5):
     from gan_inversion import Autoencoder
     global seed
     
-    # Let us try to reshape h to H
-    N_t, N_r = 2, 2
-    H = h.reshape(N_r, N_t)
+    N_r, N_t = H.shape
     
     # Normalize the channel such that the sq Frobenius norm is N_t N_r  
     H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)    
@@ -225,15 +369,17 @@ def _compress_channel(h, compression_ratio, epochs=10, batch_size=16,
     return h_compressed, h_reconstructed, error.numpy()
 
 
-def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polynomial, crc_length, n_pilot):
+def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot):
     SERs = []
     BERs = []
     block_error = 0
     
+    N_r, N_t = H.shape
+    
     Df = 15e3 # subcarrier in Hz
     tti = 1e-3 # in seconds
-    bit_rate = codeword_size / tti
-    print(f'Transmission rate = {bit_rate:.2f} bps')
+    bit_rate = codeword_size / tti * N_t
+    print(f'Transmission maximum rate = {bit_rate:.2f} bps')
     
     # Find the correct number of subcarriers required for this bit rate
     # assuming 1:1 code rate.
@@ -242,15 +388,16 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
     print(f'Transmission BW = {B:.2f} Hz')
     
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
-    Tx_SNR = 10*np.log10(Es / noise_power)
+    Tx_SNR = 10*np.log10(Es / (N_t * noise_power))
     
     N0 = noise_power / B
-    Tx_EbN0 = 10 * np.log10((Es/k) / N0)
+    Tx_EbN0 = 10 * np.log10((Es/(N_t * k)) / N0)
     
-    print(f'SNR at the transmitter: {Tx_SNR:.4f} dB')
-    print(f'EbN0 at the transmitter: {Tx_EbN0:.4f} dB')
+    print(f'SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
+    print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
     b = len(data)
-    n_transmissions = int(np.ceil(b / codeword_size))
+    n_transmissions = int(np.ceil(np.ceil(b / codeword_size) / N_t))
+    
     x_info_complete = bits_to_symbols(data, alphabet, k)
     
     data_rx = []
@@ -259,42 +406,76 @@ def transmit_receive(data, codeword_size, alphabet, h, k, noise_power, crc_polyn
     Rx_EbN0 = []
     for codeword in np.arange(n_transmissions):
         print(f'Transmitting codeword {codeword + 1}/{n_transmissions}')
-        x_info = x_info_complete[codeword*(codeword_size // k):(codeword+1)*(codeword_size // k)] #np_random.choice(alphabet['m'], size=codeword_size // k)
-        x_bits_orig = symbols_to_bits(x_info, k, alphabet)
-        # Padding with zeros
-        x_bits_orig = x_bits_orig.zfill(codeword_size)
-        x_bits_crc, _ = add_crc(x_bits_orig, crc_polynomial, crc_length)
+        # Every transmission takes up N_t symbols each symbol has codeword bits
+        x_info = x_info_complete[codeword*N_t*(codeword_size // k):(codeword+1)*N_t*(codeword_size // k)]
         
-        assert(len(x_bits_crc) == crc_length + codeword_size)
+        # CRC is added to the original data, and not per MIMO stream.
+        x_bits_orig = symbols_to_bits(x_info, k, alphabet)  # correct
+        crc = compute_crc(x_bits_orig, crc_polynomial)      # Compute CRC.
+        effective_crc_length = int(k * np.ceil(crc_length / k))
+        
+        # If CRC less than bps of constellation and N_t, pad it first.
+        x_bits_crc = x_bits_orig + crc.zfill(effective_crc_length)        
         
         # Bits to I/Q
-        x_b_i, x_b_q, x_sym_crc = bits_to_baseband(x_bits_crc)
+        x_b_i, x_b_q, x_sym_crc = bits_to_baseband(x_bits_crc, alphabet, k)
+        
+        # Number of zero pads due to transmission rank
+        pad_length = int(N_t * np.ceil(len(x_sym_crc) / N_t)) - len(x_sym_crc)
+        x_sym_crc = np.r_[x_sym_crc, np.zeros(pad_length)]
+        # x_sym_crc = x_sym_crc.reshape(N_t, -1) # did not work.
+        x_sym_crc = x_sym_crc.reshape(-1, N_t).T
+        
+        # Training sequence per transmission rank
+        t = np.zeros((N_t, n_pilot))
+        T = hankel(t, t)
         
         # Additive noise
-        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=len(x_sym_crc)) + \
-            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=len(x_sym_crc)) 
-    
+        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=N_r) + \
+            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=N_r) 
+        
+        # x_sym_crc must be a column vector of N_t
+        assert(x_sym_crc.shape[0] == N_t)
+        
         # Channel
-        y = h*x_sym_crc + n
-    
-        # Extract the pilot
-        x_p = x_sym_crc[:n_pilot]
-        y_p = y[:n_pilot]
+        L = 1 # one tap only (suitable for OFDM)
+        H_bar = np.tile(H, L)
         
-        # Channel estimation from the received signal
-        h_hat = _estimate_channel(x_p, y_p)
-        error_vector = h[:n_pilot] - h_hat
         
-        channel_estimation_mse = np.linalg.norm(np.abs(error_vector) ** 2, 2) / n_pilot
+        
+        
+        
+        
+        
+        Y = np.empty(N_r)
+        for s in range(L):
+            y_s = np.matmul(H, x_sym_crc[:,s]) + n
+            # print(y_s == x_sym_crc[:,s])
+            Y = np.c_[Y, y_s]
+        Y = Y[:, 1:] # get rid of that "empty" column.
+        
+        
+        # Estimate the channel
+        H_hat = H # _estimate_channel(x_sym_crc, y, n_pilot)
+        error_vector = _vec(H) - _vec(H_hat)
+        
+        # channel_estimation_mse = np.linalg.norm(np.abs(error_vector) ** 2, 2) / n_pilot
+        channel_estimation_mse = np.mean(np.abs(error_vector) ** 2)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Now compress h_hat
-        h_compress, h_reconstructed, comp_channel_error = _compress_channel(h_hat, compression_ratio=0)
+        # TODO: with compression, toggle comments below
+        # H_compress, H_reconstructed, comp_channel_error = _compress_channel(H_hat, compression_ratio=0)
+        H_reconstructed = H_hat
+        comp_channel_error = np.nan
         
         # Channel equalization using matched filter
-        w = np.conjugate(h_reconstructed) / (np.abs(h_reconstructed) ** 2)
-
-        x_sym_crc_hat = w[0,0] * y
+        W = np.conjugate(H_reconstructed) / (np.abs(H_reconstructed) ** 2)
+        assert(W.shape == (N_r, N_r))
+        
+        x_sym_crc_hat = W @ y
+        
+        pdb.set_trace()
         
         # Back to bits
         _, _, x_bits_crc_hat = symbols_to_bits(x_sym_crc_hat, k, alphabet,
@@ -406,15 +587,15 @@ def generate_plot(df, xlabel, ylabel):
     plt.close(fig)
     
     
-def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, crc_length, n_pilot):
-    alphabet = create_constellation(M=int(2 ** k_QPSK))
+def run_simulation(file_name, codeword_size, h, constellation, k_constellation, sigmas, crc_polynomial, crc_length, n_pilot):
+    alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
     data = read_bitmap(file_name)
 
     plot_bitmaps(data, data)
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER', 'Channel_Error'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = transmit_receive(data, codeword_size, alphabet, h, k_QPSK, sigma ** 2, crc_polynomial, crc_length, n_pilot)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = transmit_receive(data, codeword_size, alphabet, h, k_constellation, sigma ** 2, crc_polynomial, crc_length, n_pilot)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
@@ -437,11 +618,12 @@ def run_simulation(file_name, codeword_size, h, k_QPSK, sigmas, crc_polynomial, 
 
 
 # 1) Create a channel
-h = create_rayleigh_channel(length=(crc_length + codeword_size) // k_QPSK)
+H = create_rayleigh_channel(N_r=N_r, N_t=N_t) # length=(crc_length + codeword_size) // 2)
 
 # 2) Run the simulation on this channel
-df_output = run_simulation(file_name, codeword_size, h, k_QPSK, 
-                           sigmas, crc_polynomial, crc_length, n_pilot)
+df_output = run_simulation(file_name, codeword_size, H, constellation, 
+                           k_constellation, sigmas, crc_polynomial, crc_length,
+                           n_pilot)
 df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
