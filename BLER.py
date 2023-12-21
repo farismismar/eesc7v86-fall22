@@ -263,16 +263,19 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-
-def _estimate_channel(X_p, Y_p, random_state=None):
+def _estimate_channel(X_p, Y_p, noise_power, random_state=None):
     # This is for least square (LS) estimation
+    # and the linear minimum mean squared error (L-MMSE):
+    N_t, _ = X_p.shape
     
-    N_t, _ = X_p.shape    
     if not np.allclose(X_p@X_p.T, np.eye(N_t)):
         raise ValueError("The training sequence is not semi-unitary.  Cannot estimate the channel.")
     
     # This is least square (LS) estimation
-    H_hat = Y_p@X_p.conjugate().T
+    H_hat_ls = Y_p@X_p.conjugate().T
+    
+    # This is the L-MMSE estimation:
+    H_hat = H_hat_ls@np.linalg.inv(np.eye(N_t) * (1 + noise_power))
     
     return H_hat
   
