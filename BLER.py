@@ -191,6 +191,8 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
             i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
             x_bits += '{}{}'.format(i, q).zfill(k)
         return x_bits
+    
+    pdb.set_trace()
 # if is_complex == False:
     #     x_streams = []
     #     for stream in x_sym.T:
@@ -200,15 +202,15 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
     #             x_bits += '{}{}'.format(i, q).zfill(k)
     #         x_streams.append(x_bits)
     #     return x_streams
-    else:
-        pdb.set_trace()
-        x_b_i = np.sign(np.real(x_sym))
-        x_b_q = np.sign(np.imag(x_sym))
+    # else:
+    #     pdb.set_trace()
+    #     x_b_i = np.sign(np.real(x_sym))
+    #     x_b_q = np.sign(np.imag(x_sym))
 
-        x_bits = []
-        for i, q in zip(x_b_i, x_b_q):
-            x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
-        return x_b_i, x_b_q, ''.join(x_bits)
+    #     x_bits = []
+    #     for i, q in zip(x_b_i, x_b_q):
+    #         x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
+    #     return x_b_i, x_b_q, ''.join(x_bits)
 
 
 # This function is wrong.
@@ -261,45 +263,45 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
-def _estimate_channel(x, y, n_pilot, N0=None):
-    # TODO:  This is not working.
-    pdb.set_trace()
-    N_t = x.shape[0]
-    N_r = y.shape[0]
-    
-    # Extract the pilot
-    max_pilot = y.shape[1]
-    if n_pilot > max_pilot:
-        n_pilot = max_pilot
-        
-    # This will have the estimate eventually.
-    H_hat_est = np.zeros((1,N_t))
-    
-    # Find the transmit and received symbols per antenna
-    for p in range(n_pilot): # in range(x_sym_crc.shape[0]):
-        x_p = x[:, p]#.reshape(N_t, 1)
-        y_p = y[:, p]#.reshape(N_r, 1)
-        h_ls_p = np.divide(y_p, x_p)
-        print(h_ls_p)
-        
-        H_hat_est = np.r_[H_hat_est, H_ls_p]
-      
-        h_ls
-      
-        
-      # h_ls_p[np.isinf(h_ls_p)] = np.nan
-        
-        
 
-    H_hat = np.nanmean(np.array(H_hat), axis=0)
+def _estimate_channel(X_p, Y_p, random_state=None):
+    # This is for least square (LS) estimation
     
-    if N0 is not None:
-        # N0 is passed, use LMMSE
-        True
-        
+    N_t, _ = X_p.shape    
+    if not np.allclose(X_p@X_p.T, np.eye(N_t)):
+        raise ValueError("The training sequence is not semi-unitary.  Cannot estimate the channel.")
+    
+    # This is least square (LS) estimation
+    H_hat = Y_p@X_p.conjugate().T
+    
     return H_hat
+  
 
-
+def _generate_pilot(N_r, N_t, n_pilot, random_state=None):
+    # Check if the dimensions are valid for the operation
+    if n_pilot < N_t:
+        raise ValueError("The length of the training sequence should be greater than or equal to the number of transmit antennas.")
+    
+    # Compute a unitary matrix from a combinatoric of e
+    I = np.eye(N_t)
+    idx = random_state.choice(range(N_t), size=N_t, replace=False)
+    Q = I[:, idx] 
+    
+    assert(np.allclose(Q@Q.T, np.eye(N_t)))  # Q is indeed unitary, but square.
+    
+    # To make a semi-unitary, we need to post multiply with a rectangular matrix
+    # Now we need a rectangular matrix (fat)
+    A = np.zeros((N_t, n_pilot), int)
+    np.fill_diagonal(A, 1)
+    X_p =  Q @ A
+        
+    # What matrix X_pX_p* = I
+    assert(np.allclose(X_p@X_p.T, np.eye(N_t)))  # This is it
+    
+    # The training sequence is X_p.  It has N_t rows and n_pilot columns
+    return X_p
+    
+    
 def _cplex_mse(y_true, y_pred):
     y_true = K.cast(y_true, tf.complex64) 
     y_pred = K.cast(y_pred, tf.complex64) 
@@ -423,44 +425,40 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Number of zero pads due to transmission rank
         pad_length = int(N_t * np.ceil(len(x_sym_crc) / N_t)) - len(x_sym_crc)
         x_sym_crc = np.r_[x_sym_crc, np.zeros(pad_length)]
-        # x_sym_crc = x_sym_crc.reshape(N_t, -1) # did not work.
+        
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
         
-        # Training sequence per transmission rank
-        t = np.zeros((N_t, n_pilot))
-        T = hankel(t, t)
-        
         # Additive noise
-        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=N_r) + \
-            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=N_r) 
+        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot)) + \
+            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot))
+        
+        # Debug purposes
+        n = np.zeros((N_r, n_pilot))
+        H = np.eye(N_t)
+        
+        # Channel
+        Y = np.empty(N_r)
+        for s in range(N_t):
+            y_s = np.matmul(H, x_sym_crc[:,s]) + n[:,0]
+            Y = np.c_[Y, y_s]
+        Y = Y[:, 1:] # get rid of that "empty" column.
         
         # x_sym_crc must be a column vector of N_t
         assert(x_sym_crc.shape[0] == N_t)
         
+        # Pilot contribution (known sequence)
+        # Generate pilot
+        P = _generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
+        
         # Channel
-        L = 1 # one tap only (suitable for OFDM)
-        H_bar = np.tile(H, L)
-        
-        
-        
-        
-        
-        
-        
-        Y = np.empty(N_r)
-        for s in range(L):
-            y_s = np.matmul(H, x_sym_crc[:,s]) + n
-            # print(y_s == x_sym_crc[:,s])
-            Y = np.c_[Y, y_s]
-        Y = Y[:, 1:] # get rid of that "empty" column.
-        
-        
+        T = H@P + n
+    
         # Estimate the channel
-        H_hat = H # _estimate_channel(x_sym_crc, y, n_pilot)
+        H_hat = _estimate_channel(P, T, random_state=np_random)
+        
         error_vector = _vec(H) - _vec(H_hat)
         
-        # channel_estimation_mse = np.linalg.norm(np.abs(error_vector) ** 2, 2) / n_pilot
-        channel_estimation_mse = np.mean(np.abs(error_vector) ** 2)
+        channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Now compress h_hat
@@ -470,12 +468,12 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         comp_channel_error = np.nan
         
         # Channel equalization using matched filter
-        W = np.conjugate(H_reconstructed) / (np.abs(H_reconstructed) ** 2)
+        W = np.conjugate(H_reconstructed) / (np.linalg.norm(H_reconstructed, 2) ** 2)
         assert(W.shape == (N_r, N_r))
         
-        x_sym_crc_hat = W @ y
+        pdb.set_trace()        
+        x_sym_crc_hat = W @ Y # Something is wrong with the dimensions.
         
-        pdb.set_trace()
         
         # Back to bits
         _, _, x_bits_crc_hat = symbols_to_bits(x_sym_crc_hat, k, alphabet,
