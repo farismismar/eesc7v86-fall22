@@ -249,7 +249,9 @@ def create_rayleigh_channel(N_r, N_t):
     # Rayleigh fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
-
+    # Normalize the channel
+    H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)
+    
     return H
 
 
@@ -263,6 +265,17 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return df.idxmin(axis=1).values
 
 
+
+def _equalize_channel(H):
+    # Matched filter.
+    W = np.conjugate(H) / (np.linalg.norm(H, 2) ** 2)
+    
+    # 
+    
+    assert(W.shape == (N_r, N_r))    
+    return W
+        
+        
 def _estimate_channel(X_p, Y_p, noise_power, random_state=None):
     # This is for least square (LS) estimation
     # and the linear minimum mean squared error (L-MMSE):
@@ -292,13 +305,16 @@ def _generate_pilot(N_r, N_t, n_pilot, random_state=None):
     
     assert(np.allclose(Q@Q.T, np.eye(N_t)))  # Q is indeed unitary, but square.
     
+    # # Scale the unitary matrix
+    # Q /= np.linalg.norm(Q, ord='fro')
+    
     # To make a semi-unitary, we need to post multiply with a rectangular matrix
     # Now we need a rectangular matrix (fat)
     A = np.zeros((N_t, n_pilot), int)
     np.fill_diagonal(A, 1)
     X_p =  Q @ A
-        
-    # What matrix X_pX_p* = I
+    
+    # What matrix X_pX_p* = I (before scaling)
     assert(np.allclose(X_p@X_p.T, np.eye(N_t)))  # This is it
     
     # The training sequence is X_p.  It has N_t rows and n_pilot columns
@@ -436,18 +452,11 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
             1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot))
         
         # Debug purposes
-        n = np.zeros((N_r, n_pilot))
-        H = np.eye(N_t)
+        # n = np.zeros((N_r, n_pilot))
+        # H = np.eye(N_t)
         
         # Channel
-        Y = np.empty(N_r)
-        for s in range(N_t):
-            y_s = np.matmul(H, x_sym_crc[:,s]) + n[:,0]
-            Y = np.c_[Y, y_s]
-        Y = Y[:, 1:] # get rid of that "empty" column.
-        
-        # x_sym_crc must be a column vector of N_t
-        assert(x_sym_crc.shape[0] == N_t)
+        Y = H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
         
         # Pilot contribution (known sequence)
         # Generate pilot
@@ -457,7 +466,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         T = H@P + n
     
         # Estimate the channel
-        H_hat = _estimate_channel(P, T, random_state=np_random)
+        H_hat = _estimate_channel(P, T, noise_power, random_state=np_random)
         
         error_vector = _vec(H) - _vec(H_hat)
         
@@ -471,12 +480,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         comp_channel_error = np.nan
         
         # Channel equalization using matched filter
-        W = np.conjugate(H_reconstructed) / (np.linalg.norm(H_reconstructed, 2) ** 2)
-        assert(W.shape == (N_r, N_r))
+        W = _equalize_channel(H_reconstructed)
         
         pdb.set_trace()        
         x_sym_crc_hat = W @ Y # Something is wrong with the dimensions.
-        
         
         # Back to bits
         _, _, x_bits_crc_hat = symbols_to_bits(x_sym_crc_hat, k, alphabet,
