@@ -183,16 +183,19 @@ def bits_to_symbols(x_b, alphabet, k):
     return np.array(x_sym)
 
 
-# TODO: The next two functions are a bit off?
 def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
-    if is_complex == False:
+    pdb.set_trace()
+    if is_complex == False: # Here, symbols are given by number, not by I/Q
         x_bits = ''
         for s in x_sym:
             i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
             x_bits += '{}{}'.format(i, q).zfill(k)
         return x_bits
-    
-    pdb.set_trace()
+    else:
+        # Convert the symbols to number first, then call the function again
+        x_sym_IQ = x_sym
+        x_sym_m = alphabet.loc[alphabet['x'] == x_symIQ, 'm']
+        
 # if is_complex == False:
     #     x_streams = []
     #     for stream in x_sym.T:
@@ -213,7 +216,7 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
     #     return x_b_i, x_b_q, ''.join(x_bits)
 
 
-# This function is wrong.
+# TODO: The next function is a bit off?
 def bits_to_baseband(x_bits, alphabet, k):
     x_b_i = []
     x_b_q = []
@@ -256,15 +259,42 @@ def create_rayleigh_channel(N_r, N_t):
 
 
 def ML_detect_symbol(x_sym_hat, alphabet):
-    # This function returns argmin |x - s_m| based on AWGN ML detection
-    df = pd.DataFrame(data={0: abs(x_sym_hat - alphabet.loc[alphabet['m'] == 0, 'x'].values[0]),
-                            1: abs(x_sym_hat - alphabet.loc[alphabet['m'] == 1, 'x'].values[0]),
-                            2: abs(x_sym_hat - alphabet.loc[alphabet['m'] == 2, 'x'].values[0]),
-                            3: abs(x_sym_hat - alphabet.loc[alphabet['m'] == 3, 'x'].values[0])})
+    # Certainly correct in obtaining the information
+    df_information = pd.DataFrame()
+    x_sym_hat_flat = x_sym_hat.flatten()
     
-    return df.idxmin(axis=1).values
-
-
+    for s in range(x_sym_hat_flat.shape[0]):
+        x_hat = x_sym_hat_flat[s]
+        # This function returns argmin |x - s_m| based on AWGN ML detection
+        # for any arbitrary constellation denoted by the alphabet
+        distances = alphabet['x'].apply(lambda x: abs(x - x_hat) ** 2)
+        m_star = distances.idxmin(axis=0)
+        
+        df_i = pd.DataFrame(data={'m': m_star,
+                                  'x': alphabet.loc[alphabet['m'] == m_star, 'x'],
+                                  'I': alphabet.loc[alphabet['m'] == m_star, 'I'],
+                                  'Q': alphabet.loc[alphabet['m'] == m_star, 'Q']})
+        
+        df_information = pd.concat([df_information, df_i], axis=0, ignore_index=True)
+    
+    information = df_information['m'].values.reshape(x_sym_hat.shape)
+    
+    
+    # Now simply compute other elements.
+    symbols = df_information['x'].values.reshape(x_sym_hat.shape)
+    bits_i = df_information['I'].values#.reshape(x_sym_hat.shape)
+    bits_q = df_information['Q'].values#.reshape(x_sym_hat.shape)
+    
+    bits = []
+    for s in range(x_sym_hat_flat.shape[0]):
+        bits.append(f'{bits_i[s]}{bits_q[s]}')
+        
+    bits = np.array(bits).reshape(x_sym_hat.shape)
+    bits_i = bits_i.reshape(x_sym_hat.shape)
+    bits_q = bits_q.reshape(x_sym_hat.shape)
+    
+    return information, symbols, [bits_i, bits_q], bits
+    
 
 def _equalize_channel(H):
     # Matched filter.
@@ -274,7 +304,7 @@ def _equalize_channel(H):
     
     assert(W.shape == (N_r, N_r))    
     return W
-        
+
         
 def _estimate_channel(X_p, Y_p, noise_power, random_state=None):
     # This is for least square (LS) estimation
@@ -452,8 +482,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
             1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot))
         
         # Debug purposes
-        # n = np.zeros((N_r, n_pilot))
-        # H = np.eye(N_t)
+        n = np.zeros((N_r, n_pilot))
+        H = np.eye(N_t)
         
         # Channel
         Y = H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
@@ -482,12 +512,24 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Channel equalization using matched filter
         W = _equalize_channel(H_reconstructed)
         
-        pdb.set_trace()        
-        x_sym_crc_hat = W @ Y # Something is wrong with the dimensions.
+        # The optimal equalizer should fulfill WH = I.
+        x_sym_crc_hat = W @ Y
         
-        # Back to bits
-        _, _, x_bits_crc_hat = symbols_to_bits(x_sym_crc_hat, k, alphabet,
-                                                       is_complex=True)
+        # Detection of symbols (symbol star is the centroid of the constellation)
+        info, x_sym_star_crc_hat, _, x_bits_crc_hat = ML_detect_symbol(x_sym_crc_hat, alphabet)
+        
+        print(symbols_to_bits(x_sym_star_crc_hat, k_constellation, alphabet, is_complex=True))
+        
+        pdb.set_trace()
+        
+        
+        
+        
+        
+        
+        x_bits_crc_hat = ''.join(list(x_bits_crc_hat.flatten()))
+        
+        pdb.set_trace()
         # Remove CRC
         x_bits_hat, crc = x_bits_crc_hat[:-crc_length], x_bits_crc_hat[-crc_length:]
         
@@ -506,11 +548,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         x_sym_hat = x_sym_crc_hat[:-crc_length // k]
         
         ########################################################
-        # Symbol ML detection
-        x_info_hat = ML_detect_symbol(x_sym_hat, alphabet)
-        
-        ########################################################
-        
         # Error statistics
         symbol_error = 1 - np.mean(x_info_hat == x_info)
         SERs.append(symbol_error)
@@ -603,7 +640,8 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER', 'Channel_Error'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = transmit_receive(data, codeword_size, alphabet, h, k_constellation, sigma ** 2, crc_polynomial, crc_length, n_pilot)
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = \
+            transmit_receive(data, codeword_size, alphabet, h, k_constellation, sigma ** 2, crc_polynomial, crc_length, n_pilot)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
