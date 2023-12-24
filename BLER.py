@@ -183,18 +183,32 @@ def bits_to_symbols(x_b, alphabet, k):
     return np.array(x_sym)
 
 
-def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
-    pdb.set_trace()
+def symbols_to_bits(x_sym, k, alphabet, is_complex=False):    
     if is_complex == False: # Here, symbols are given by number, not by I/Q
         x_bits = ''
         for s in x_sym:
-            i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
+            try:
+                i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
+            except:
+                # There is no corresponding I/Q, so these are padding, simply append with X
+                i, q = 'X', 'X'
+                pass
             x_bits += '{}{}'.format(i, q).zfill(k)
         return x_bits
     else:
         # Convert the symbols to number first, then call the function again
+        information = []
         x_sym_IQ = x_sym
-        x_sym_m = alphabet.loc[alphabet['x'] == x_symIQ, 'm']
+        # m, n = x_sym_IQ.shape
+        x_sym_IQ = x_sym_IQ.flatten()
+        for s in x_sym_IQ:
+            try:
+                information.append(alphabet[np.isclose(alphabet['x'], s)]['m'].values[0])
+            except:
+                information.append('X')
+                pass
+        information = np.array(information)
+        return symbols_to_bits(information, k, alphabet, is_complex=False)
         
 # if is_complex == False:
     #     x_streams = []
@@ -216,7 +230,6 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
     #     return x_b_i, x_b_q, ''.join(x_bits)
 
 
-# TODO: The next function is a bit off?
 def bits_to_baseband(x_bits, alphabet, k):
     x_b_i = []
     x_b_q = []
@@ -236,13 +249,17 @@ def bits_to_baseband(x_bits, alphabet, k):
     return x_b_i, x_b_q, x_sym
 
 
-def compute_crc(x_bits_orig, crc_polynomial):
+def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     # Introduce CRC to x
     crc = 0
     for position, value in enumerate(bin(crc_polynomial)[2:]):
         if value == '1':
             crc = crc ^ int(x_bits_orig[position])
     crc = bin(crc)[2:]
+    
+    if len(crc) > crc_length:
+        raise ValueError("Check CRC length parameter.")
+    crc = crc.zfill(crc_length)
     
     return crc
 
@@ -298,9 +315,10 @@ def ML_detect_symbol(x_sym_hat, alphabet):
 
 def _equalize_channel(H):
     # Matched filter.
-    W = np.conjugate(H) / (np.linalg.norm(H, 2) ** 2)
+    # W = np.conjugate(H) / (np.linalg.norm(H, 2) ** 2)
     
-    # 
+    # ZF equalization
+    W = np.linalg.pinv(H)
     
     assert(W.shape == (N_r, N_r))    
     return W
@@ -420,7 +438,7 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
     return h_compressed, h_reconstructed, error.numpy()
 
 
-def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot):
+def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
     SERs = []
     BERs = []
     block_error = 0
@@ -429,12 +447,16 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     
     Df = 15e3 # subcarrier in Hz
     tti = 1e-3 # in seconds
+    
+    # Effective codeword size, must coincide with integer number of symbols
+    codeword_size = int(np.ceil(codeword_size / k) * k)
+    
     bit_rate = codeword_size / tti * N_t
     print(f'Transmission maximum rate = {bit_rate:.2f} bps')
     
     # Find the correct number of subcarriers required for this bit rate
     # assuming 1:1 code rate.
-    Nsc = np.ceil(bit_rate / (k * Df))    # Number of subcarriers
+    Nsc = np.ceil(bit_rate / (k * Df))    # Number of OFDM subcarriers
     B = Nsc * Df # Transmit bandwidth
     print(f'Transmission BW = {B:.2f} Hz')
     
@@ -447,34 +469,35 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     print(f'SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
     b = len(data)
-    n_transmissions = int(np.ceil(np.ceil(b / codeword_size) / N_t))
+    n_transmissions = int(np.ceil(b / (codeword_size * N_t)))
     
     x_info_complete = bits_to_symbols(data, alphabet, k)
     
-    data_rx = []
-    
+    data_rx = []    
     print(f'Transmitting a total of {b} bits.')
     Rx_EbN0 = []
     for codeword in np.arange(n_transmissions):
         print(f'Transmitting codeword {codeword + 1}/{n_transmissions}')
-        # Every transmission takes up N_t symbols each symbol has codeword bits
+        # Every transmission is for one codeword, divided up to N_t streams.
         x_info = x_info_complete[codeword*N_t*(codeword_size // k):(codeword+1)*N_t*(codeword_size // k)]
         
-        # CRC is added to the original data, and not per MIMO stream.
-        x_bits_orig = symbols_to_bits(x_info, k, alphabet)  # correct
-        crc = compute_crc(x_bits_orig, crc_polynomial)      # Compute CRC.
-        effective_crc_length = int(k * np.ceil(crc_length / k))
+        # 1) Compute CRC based on the original codeword
+        # 2) Pad what is left *in between* to fulfill MIMO rank
+        x_bits_orig = symbols_to_bits(x_info, k, alphabet)          # correct
+        crc = compute_crc(x_bits_orig, crc_polynomial, crc_length)  # Compute CRC in bits.
         
-        # If CRC less than bps of constellation and N_t, pad it first.
-        x_bits_crc = x_bits_orig + crc.zfill(effective_crc_length)        
-        
-        # Bits to I/Q
-        x_b_i, x_b_q, x_sym_crc = bits_to_baseband(x_bits_crc, alphabet, k)
-        
-        # Number of zero pads due to transmission rank
-        pad_length = int(N_t * np.ceil(len(x_sym_crc) / N_t)) - len(x_sym_crc)
-        x_sym_crc = np.r_[x_sym_crc, np.zeros(pad_length)]
-        
+        effective_crc_length = int(k * np.ceil(crc_length / k)) # The receiver is also aware of the CRC length (in bits)
+        crc_padded = crc.zfill(effective_crc_length)
+        _, _, crc_symbols = bits_to_baseband(crc_padded, alphabet, k)
+        effective_crc_length_symbols = effective_crc_length // k # in symbols
+                
+        # Symbols
+        x_b_i, x_b_q, x_sym = bits_to_baseband(x_bits_orig, alphabet, k)
+
+        # Map codewords to the MIMO layers.
+        pad_length = int(N_t * np.ceil((len(x_sym) + effective_crc_length_symbols) / N_t)) - len(x_sym) - effective_crc_length_symbols # in symbols
+        x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
+
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
         
         # Additive noise
@@ -482,9 +505,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
             1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot))
         
         # Debug purposes
-        n = np.zeros((N_r, n_pilot))
-        H = np.eye(N_t)
-        
+        if perfect_csi:
+            n = np.zeros((N_r, n_pilot))
+            H = np.eye(N_t)
+            
         # Channel
         Y = H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
         
@@ -512,60 +536,58 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Channel equalization using matched filter
         W = _equalize_channel(H_reconstructed)
         
-        # The optimal equalizer should fulfill WH = I.
-        x_sym_crc_hat = W @ Y
+        # The optimal equalizer should fulfill W*H = I.
+        x_sym_crc_hat = W.conjugate().transpose() @ Y
         
-        # Detection of symbols (symbol star is the centroid of the constellation)
-        info, x_sym_star_crc_hat, _, x_bits_crc_hat = ML_detect_symbol(x_sym_crc_hat, alphabet)
+        crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
+        x_sym_hat = _vec(x_sym_crc_hat)[:-effective_crc_length_symbols] # payload including padding
         
-        print(symbols_to_bits(x_sym_star_crc_hat, k_constellation, alphabet, is_complex=True))
+        # Remove the padding, which is essentially defined by the last data not on N_t boundary
+        #######padding_length = int((x_sym_hat.shape[0] / N_t - x_sym_hat.shape[0] // N_t) * N_t) # in symbols
+        if pad_length > 0:
+            x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
         
-        pdb.set_trace()
-        
-        
-        
-        
-        
-        
-        x_bits_crc_hat = ''.join(list(x_bits_crc_hat.flatten()))
-        
-        pdb.set_trace()
-        # Remove CRC
-        x_bits_hat, crc = x_bits_crc_hat[:-crc_length], x_bits_crc_hat[-crc_length:]
+        # Detection of symbols (symbol star is the centroid of the constellation)        
+        x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
+        x_bits_hat = ''.join(x_bits_hat)
         
         # Compute the EbN0 at the receiver
-        received_noise_power = noise_power * np.real(np.mean(np.vdot(w, w))) # equalization enhanced noise
+        received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
         N0 = received_noise_power / B
         Rx_EbN0.append(10 * np.log10((Es/k) / N0))
         
         # Compute CRC on the received frame
-        _, crc_comp = add_crc(x_bits_hat, crc_polynomial, crc_length)
+        crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
         
         if int(crc) != int(crc_comp):
             block_error += 1
             
-        # Now back to symbol without the CRC
-        x_sym_hat = x_sym_crc_hat[:-crc_length // k]
-        
         ########################################################
         # Error statistics
         symbol_error = 1 - np.mean(x_info_hat == x_info)
         SERs.append(symbol_error)
         
-        x_hat_b_i, x_hat_b_q, x_hat_b = symbols_to_bits(x_sym_hat, k, alphabet, is_complex=True)
-        ber_i = 1 - np.mean(x_hat_b_i == x_b_i[:-crc_length // 2])
-        ber_q = 1 - np.mean(x_hat_b_q == x_b_q[:-crc_length // 2])
+        x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
+        x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_hat_b, alphabet, k)
+
+        ber_i = 1 - np.mean(x_hat_b_i == x_b_i)
+        ber_q = 1 - np.mean(x_hat_b_q == x_b_q)
+        
+        # System should preserve the number of bits.
+        assert(len(x_bits_orig) == len(x_hat_b))
         
         data_rx.append(x_hat_b)
         ber = np.mean([ber_i, ber_q])
         BERs.append(ber)
         # for
-        
+
+    total_transmitted_bits = N_t * codeword_size * n_transmissions
+    print(f"Total transmitted bits: {total_transmitted_bits} bits.")
+
     BLER = block_error / n_transmissions
 
-    data_rx_ = [np.array([d[:8], d[-8:]]) for d in data_rx]
-    data_rx_ = np.array(data_rx_).flatten()
-    data_rx_ = ''.join(data_rx_)
+    # Now extract from every transmission 
+    data_rx_ = ''.join(data_rx)
     
     return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_, comp_channel_error
 
