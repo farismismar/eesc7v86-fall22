@@ -1,4 +1,4 @@
-	# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Created on Thu Oct 12 16:19:40 2023
 
@@ -30,13 +30,13 @@ constellation = 'QAM'
 M_constellation = 64
 seed = 7
 codeword_size = 16 # bits
-k_constellation = int(np.log2(M_constellation))
 n_pilot = 20
 N_r = 16
 N_t = 16
-
-plt.rcParams['font.family'] = "Arial"
-plt.rcParams['font.size'] = "14"
+compression_ratio = 0.5 # try to make N_t, N_r power of two
+epoch_count = 250
+batch_size = 32
+training_split = 0.8
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
@@ -45,7 +45,11 @@ crc_length = 2 # bits
 sigmas = np.sqrt(np.logspace(-4, -1, num=6)) # square root of noise power
 ##################
 
+plt.rcParams['font.family'] = "Arial"
+plt.rcParams['font.size'] = "14"
+
 np_random = np.random.RandomState(seed=seed)
+k_constellation = int(np.log2(M_constellation))
 
 def create_constellation(constellation, M):
     if (constellation == 'QPSK'):
@@ -56,7 +60,6 @@ def create_constellation(constellation, M):
         return None
      
 # Constellation based on Gray code
-# OK
 def create_constellation_psk(M):
     k = np.log2(M)
     if k != int(k): # only square constellations are allowed.
@@ -245,9 +248,8 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     return crc
 
 
-def create_rayleigh_channel(N_r, N_t):
-    G = 1 # large scale fading constant
-    # Rayleigh fading
+def create_rayleigh_channel(N_r, N_t, G=1):
+    # Rayleigh fading with G being the large scale fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
     # Normalize the channel
@@ -257,7 +259,6 @@ def create_rayleigh_channel(N_r, N_t):
 
 
 def ML_detect_symbol(x_sym_hat, alphabet):
-    # Certainly correct in obtaining the information
     df_information = pd.DataFrame()
     x_sym_hat_flat = x_sym_hat.flatten()
     
@@ -276,7 +277,6 @@ def ML_detect_symbol(x_sym_hat, alphabet):
         df_information = pd.concat([df_information, df_i], axis=0, ignore_index=True)
     
     information = df_information['m'].values.reshape(x_sym_hat.shape)
-    
     
     # Now simply compute other elements.
     symbols = df_information['x'].values.reshape(x_sym_hat.shape)
@@ -417,6 +417,8 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
 
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
+    global compression_ratio, epoch_count, batch_size, training_split
+    
     SERs = []
     BERs = []
     block_error = 0
@@ -443,11 +445,14 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     
     N0 = noise_power / B
     Tx_EbN0 = 10 * np.log10((Es/(N_t * k)) / N0)
-    
     print(f'SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
+    
     b = len(data)
     n_transmissions = int(np.ceil(b / (codeword_size * N_t)))
+    
+    # Find G from the normalized channel
+    G = np.trace(H.conjugate().T@H) / (N_r * N_t)
     
     x_info_complete = bits_to_symbols(data, alphabet, k)
     
@@ -506,11 +511,13 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Now compress h_hat
-        H_compress, H_reconstructed, comp_channel_error = _compress_channel(H_hat, compression_ratio=0.1)
+        H_compress, H_reconstructed, comp_channel_error = \
+            _compress_channel(H_hat, compression_ratio=compression_ratio, 
+                              epochs=epoch_count, batch_size=batch_size, 
+                              training_split=training_split)
         H_reconstructed = H_hat
-        # comp_channel_error = np.nan
         
-        # Channel equalization using matched filter
+        # Channel equalization using ZF
         W = _equalize_channel(H_reconstructed)
         
         # The optimal equalizer should fulfill W*H = I.
@@ -662,7 +669,7 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
 
 
 # 1) Create a channel
-H = create_rayleigh_channel(N_r=N_r, N_t=N_t) # length=(crc_length + codeword_size) // 2)
+H = create_rayleigh_channel(N_r=N_r, N_t=N_t, G=1)
 
 # 2) Run the simulation on this channel
 df_output = run_simulation(file_name, codeword_size, H, constellation, 

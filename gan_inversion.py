@@ -24,6 +24,8 @@ from tensorflow.keras.models import Model
 import matplotlib.pyplot as plt
 import time
 
+import pdb
+
 # https://www.tensorflow.org/tutorials/generative/autoencoder
 
 class Autoencoder(Model):
@@ -46,13 +48,23 @@ class Autoencoder(Model):
         self.encoder.add(layers.Dense(16, activation='relu'))
         self.encoder.add(layers.Dense(latent_dim, activation='relu'))
         
+        # self.encoder.add(layers.Conv2D(32, (2, 2), input_shape=shape,
+        #                                strides=(2,2), activation='relu', padding='same'))
+        # self.encoder.add(layers.MaxPooling2D((2,2), padding='same'))
+        # self.encoder.add(layers.Conv2D(32, (latent_dim, latent_dim), strides=(2,2), activation='relu', padding='same'))
+        # self.encoder.add(layers.MaxPooling2D((2,2), padding='same'))
+        
+        
         self.decoder = tf.keras.Sequential(name='decoder')
         self.decoder.add(layers.Dense(32, activation='relu'))
         self.decoder.add(layers.Dense(tf.math.reduce_prod(shape), 
                                       activation='sigmoid'))
         self.decoder.add(layers.Reshape(shape))
-
-
+        
+        # self.decoder.add(layers.Conv2DTranspose(32, (2, 2), strides=(2,2), activation='relu', padding='same'))
+        # self.decoder.add(layers.Conv2DTranspose(32, (2, 2), strides=(2,2), activation='relu', padding='same'))
+        # self.decoder.add(layers.Conv2D(1, (2, 2), activation='sigmoid'))
+        
     def call(self, x):
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
