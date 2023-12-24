@@ -31,9 +31,9 @@ M_constellation = 64
 seed = 7
 codeword_size = 16 # bits
 k_constellation = int(np.log2(M_constellation))
-n_pilot = 4
-N_r = 2
-N_t = 2
+n_pilot = 20
+N_r = 16
+N_t = 16
 
 plt.rcParams['font.family'] = "Arial"
 plt.rcParams['font.size'] = "14"
@@ -42,7 +42,7 @@ plt.rcParams['font.size'] = "14"
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-1, 3, num=8)) # square root of noise power
+sigmas = np.sqrt(np.logspace(-4, -1, num=6)) # square root of noise power
 ##################
 
 np_random = np.random.RandomState(seed=seed)
@@ -209,25 +209,6 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
                 pass
         information = np.array(information)
         return symbols_to_bits(information, k, alphabet, is_complex=False)
-        
-# if is_complex == False:
-    #     x_streams = []
-    #     for stream in x_sym.T:
-    #         x_bits = ''
-    #         for s in stream:
-    #             i, q = alphabet.loc[alphabet['m'] == s, ['I', 'Q']].values[0]
-    #             x_bits += '{}{}'.format(i, q).zfill(k)
-    #         x_streams.append(x_bits)
-    #     return x_streams
-    # else:
-    #     pdb.set_trace()
-    #     x_b_i = np.sign(np.real(x_sym))
-    #     x_b_q = np.sign(np.imag(x_sym))
-
-    #     x_bits = []
-    #     for i, q in zip(x_b_i, x_b_q):
-    #         x_bits.append('{}{}'.format(int(0.5*i + 0.5), int(0.5*q + 0.5)))
-    #     return x_b_i, x_b_q, ''.join(x_bits)
 
 
 def bits_to_baseband(x_bits, alphabet, k):
@@ -299,8 +280,8 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     
     # Now simply compute other elements.
     symbols = df_information['x'].values.reshape(x_sym_hat.shape)
-    bits_i = df_information['I'].values#.reshape(x_sym_hat.shape)
-    bits_q = df_information['Q'].values#.reshape(x_sym_hat.shape)
+    bits_i = df_information['I'].values
+    bits_q = df_information['Q'].values
     
     bits = []
     for s in range(x_sym_hat_flat.shape[0]):
@@ -311,7 +292,7 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     bits_q = bits_q.reshape(x_sym_hat.shape)
     
     return information, symbols, [bits_i, bits_q], bits
-    
+
 
 def _equalize_channel(H):
     # Matched filter.
@@ -384,13 +365,10 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
     
     N_r, N_t = H.shape
     
-    # Normalize the channel such that the sq Frobenius norm is N_t N_r  
-    H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)    
-    
-    latent_dim = H.shape[1]
+    latent_dim = N_t
     
     compressed_latent_dim = int((1 - compression_ratio) * latent_dim)
-    training_size = int(training_split * H.shape[0])
+    training_size = int(training_split * N_r)
     
     autoencoder_re = Autoencoder(compressed_latent_dim, 
                               shape=H.shape[1:], seed=seed)
@@ -398,12 +376,12 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
     
     # For the encoder to learn to compress, pass x_train as an input and target
     # Decoder will learn how to reconstruct original 
-    x_train = np.real(H[:training_size, 1])
-    x_test = np.real(H[training_size:, 1])
+    x_train = np.real(H[:training_size, :])
+    x_test = np.real(H[training_size:, :])
     
     history_re = autoencoder_re.fit(x_train, x_train,
                     epochs=epochs, batch_size=batch_size,
-                    shuffle=True,
+                    shuffle=False,
                     validation_data=(x_test, x_test))
     
     # Encoded samples are compressed and the latent vector has a lower
@@ -418,12 +396,12 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
                               shape=H.shape[1:], seed=seed)
     autoencoder_im.compile(optimizer='adam', loss=_cplex_mse)
     
-    x_train = np.imag(H[:training_size, 1])
-    x_test = np.imag(H[training_size:, 1])
+    x_train = np.imag(H[:training_size, :])
+    x_test = np.imag(H[training_size:, :])
     
     history_im = autoencoder_im.fit(x_train, x_train,
                     epochs=epochs, batch_size=batch_size,
-                    shuffle=True,
+                    shuffle=False,
                     validation_data=(x_test, x_test))
     h_im_compressed = autoencoder_im.encoder.predict(x_test)
     h_im_reconstructed = autoencoder_im.decoder.predict(h_im_compressed)
@@ -528,10 +506,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Now compress h_hat
-        # TODO: with compression, toggle comments below
-        # H_compress, H_reconstructed, comp_channel_error = _compress_channel(H_hat, compression_ratio=0)
+        H_compress, H_reconstructed, comp_channel_error = _compress_channel(H_hat, compression_ratio=0.1)
         H_reconstructed = H_hat
-        comp_channel_error = np.nan
+        # comp_channel_error = np.nan
         
         # Channel equalization using matched filter
         W = _equalize_channel(H_reconstructed)
@@ -539,11 +516,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # The optimal equalizer should fulfill W*H = I.
         x_sym_crc_hat = W.conjugate().transpose() @ Y
         
-        crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
+        # crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
         x_sym_hat = _vec(x_sym_crc_hat)[:-effective_crc_length_symbols] # payload including padding
         
         # Remove the padding, which is essentially defined by the last data not on N_t boundary
-        #######padding_length = int((x_sym_hat.shape[0] / N_t - x_sym_hat.shape[0] // N_t) * N_t) # in symbols
         if pad_length > 0:
             x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
         
