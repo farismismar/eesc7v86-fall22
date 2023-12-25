@@ -26,6 +26,7 @@ from scipy.linalg import hankel
 file_name = 'faris.bmp'
 
 # System parameters
+compress_channel = True
 constellation = 'QAM'
 M_constellation = 64
 seed = 7
@@ -418,6 +419,7 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
     global compression_ratio, epoch_count, batch_size, training_split
+    global compress_channel
     
     SERs = []
     BERs = []
@@ -510,12 +512,16 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
-        # Now compress h_hat
-        H_compress, H_reconstructed, comp_channel_error = \
-            _compress_channel(H_hat, compression_ratio=compression_ratio, 
-                              epochs=epoch_count, batch_size=batch_size, 
-                              training_split=training_split)
-        H_reconstructed = H_hat
+        if compress_channel:
+            # Now compress h_hat
+            H_compress, H_reconstructed, comp_channel_error = \
+                _compress_channel(H_hat, compression_ratio=compression_ratio, 
+                                  epochs=epoch_count, batch_size=batch_size, 
+                                  training_split=training_split)
+        else:
+            # No compression here.
+            H_reconstructed = H_hat
+            comp_channel_error = np.nan
         
         # Channel equalization using ZF
         W = _equalize_channel(H_reconstructed)
