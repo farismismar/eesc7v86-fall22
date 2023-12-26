@@ -31,6 +31,6 @@ primaryClass={cs.IT}
 | Version        | Date           | Description  |
 | ------------- |:-------------:| :-----|
 | 0.1      | 2022-01-02 | First release |
-| 0.2      | 2022-02-24 | Added k-means detection |
-| 0.3      | 2022-03-07 | Added unsupervised detection and M-QAM |
-| 0.4      | 2023-12-26 | Pilot-based channel estimation |
+| 0.2      | 2022-02-24 | Further features |
+| 0.3      | 2022-03-07 | Further improvements and bug fixes |
+| 0.4      | 2023-12-26 | Miscellaneous bug fixes and public release |
