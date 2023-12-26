@@ -7,8 +7,11 @@ Created on Thu Oct 12 16:19:40 2023
 
 import numpy as np
 import pandas as pd
+from scipy.constants import pi, c
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
 import pdb
 
@@ -19,7 +22,7 @@ if os.name == 'nt':
     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
 
 import tensorflow as tf
-print(tf.config.list_physical_devices('GPU'))
+# print(tf.config.list_physical_devices('GPU'))
 
 # The GPU ID to use, usually either "0" or "1" based on previous line.
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
@@ -39,12 +42,13 @@ codeword_size = 16 # bits
 n_pilot = 20
 N_r = 16
 N_t = 16
+f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-4, -1, num=6)) # square root of noise power
+sigmas = np.sqrt(np.logspace(-1, 2, num=6)) # square root of noise power
 
 prefer_gpu = True
 ##################
@@ -256,7 +260,8 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     return crc
 
 
-def create_rayleigh_channel(N_r, N_t, G=1):
+def create_rayleigh_channel(N_r, N_t):
+    global G
     # Rayleigh fading with G being the large scale fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
@@ -266,18 +271,17 @@ def create_rayleigh_channel(N_r, N_t, G=1):
     return H
 
 
+def _loss_fn_classifier(Y_true, Y_pred):
+    cce = tf.keras.losses.CategoricalCrossentropy()
+    return cce(Y_true, Y_pred)
 
-def _loss_fn_classifier(y_true, y_pred):
-    bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-    return bce(y_true, y_pred)
 
-
-def _create_dnn(input_shape, depth=5, width=10):
-    mX, nX = input_shape
-    nY = 1 # do not change it
+def _create_dnn(input_dimension, output_dimension, depth=5, width=10):
+    nX = input_dimension
+    nY = output_dimension
     
     model = keras.Sequential()
-    model.add(keras.Input(shape=input_shape))
+    model.add(keras.Input(shape=(input_dimension,)))
     
     for hidden in range(depth):
         model.add(layers.Dense(width, activation='sigmoid'))
@@ -296,68 +300,43 @@ def _create_dnn(input_shape, depth=5, width=10):
     return model
 
 
-# TODO: Incomplete
-def _DNN_detect_symbol(x_sym_hat, alphabet, train_split=0.6, depth=5, width=2):
+def DNN_detect_symbol(X, y, train_split=0.8, depth=5, width=2, epoch_count=100, batch_size=32):
     global prefer_gpu
+    global np_random
     
     use_cuda = len(tf.config.list_physical_devices('GPU')) > 0 and prefer_gpu
     device = "/gpu:0" if use_cuda else "/cpu:0"
+
+    _, nX = X.shape
+    
+    X_train, X_test, y_train, y_test = \
+        train_test_split(X, y, train_size=train_split,
+                    random_state=np_random)
   
-    x_sym_hat_flat = x_sym_hat.flatten()
+    le = LabelEncoder()
+    le.fit(y_train)
+    encoded_y = le.transform(y_train)     
+    Y_train = keras.utils.to_categorical(encoded_y)
+    encoded_y = le.transform(y_test)
+    Y_test = keras.utils.to_categorical(encoded_y)
+    
+    _, nY = Y_train.shape
 
-    X = np.real(x_sym_hat_flat)
-    X = np.c_[X, np.imag(x_sym_hat_flat)]
-    X = X.astype('float32')
+    dnn_classifier = _create_dnn(input_dimension=nX, output_dimension=nY,
+                                 depth=depth, width=width)
     
-    training_data = int(train_split * len(x_sym_hat_flat))
-    
-    dnn_classifier = _create_dnn(depth=depth, width=width)
-    
-    x_train = alphabet
-    
-    
-    
-    
-    
-    x_test = x_sym_hat_flat[training_data:]
-    
-    x_train = sc.fit_transform(x_train)
-    x_test = sc.transform(x_test)
+    with tf.device(device):
+        dnn_classifier.fit(X_train, Y_train, epochs=epoch_count, batch_size=batch_size)
+        
+    with tf.device(device):
+        Y_pred = dnn_classifier.predict(X_test)
+        loss, accuracy_score, _ = dnn_classifier.evaluate(X_test, Y_test)
+
+    # Reverse the encoded categories
+    y_test = le.inverse_transform(np.argmax(Y_test, axis=1))
+    y_pred = le.inverse_transform(np.argmax(Y_pred, axis=1))
       
-    with tf.device(device)::
-        dnn_classifier.fit(x_train, )
-        
-        
-        
-        
-    
-    df_predictions = pd.DataFrame()
-    for streams in range(1, N_t + 1):
-   
-        X_ = X.filter(regex=f'{streams}')
-        y_ = y.filter(regex=f'{streams}')
-        
-        X_test_, y_test_ = dnn_classifier.train(X_, y_,
-                    train_size=train_size, n_epochs=n_epochs, 
-                    batch_size=batch_size)
-        acc, y_pred_ = dnn_classifier.test(X_test_, y_test_)
-        
-        df_predictions_s = pd.DataFrame(data={'stream': streams,
-                                              'm_true': y_test_,
-                                              'm_pred_dnn': y_pred_})
-        df_predictions = pd.concat([df_predictions, df_predictions_s], axis=0)
-
-    df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_dnn']).astype(int)
-
-    df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
-
-    # This is the correct way to calculate accuracy.  Why?
-    weighted_average_accuracy = df_predictions['match'].mean()
-    
-    # This should match the weighted accuracy if streams are equally likely
-    arithmetic_average_accuracy = df_pred_branch['match'].mean()
-    
-    return information, symbols, [bits_i, bits_q], bits
+    return dnn_classifier, accuracy_score, np.c_[y_test, y_pred]
 
 
 def _unsupervised_detection(x_sym_hat, alphabet):
@@ -393,13 +372,6 @@ def _unsupervised_detection(x_sym_hat, alphabet):
     return information, symbols, [bits_i, bits_q], bits
 
 
-# TODO: Incomplete
-def _ensemble_detection(x_sym_hat, alphabet):
-
-    
-    return information, symbols, [bits_i, bits_q], bits
-
-    
 def ML_detect_symbol(x_sym_hat, alphabet):
     df_information = pd.DataFrame()
     x_sym_hat_flat = x_sym_hat.flatten()
@@ -447,10 +419,10 @@ def quantize(Y, b):
 
 
 def equalize_channel(H):
-    global N_t, N_r
+    global N_t, N_r, G
     
     # ZF equalization
-    W = np.linalg.pinv(H)
+    W = 1/np.sqrt(G) * np.linalg.pinv(H)
     
     assert(W.shape == (N_r, N_t))
     
@@ -534,7 +506,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     
     b = len(data)
     n_transmissions = int(np.ceil(b / (codeword_size * N_t)))
-    
+     
     # Find G from the normalized channel
     G = np.trace(H.conjugate().T@H) / (N_r * N_t)
     
@@ -614,6 +586,11 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
         # x_info_hat, _, _, x_bits_hat = _unsupervised_detection(x_sym_hat, alphabet)
         x_bits_hat = ''.join(x_bits_hat)
+        
+        # # To test the performance of DNN in detecting symbols:
+        # X = np.c_[np.real(x_sym_hat), np.imag(x_sym_hat)]
+        # y = x_info_hat
+        # model_dnn, dnn_accuracy_score, _ = DNN_detect_symbol(X=X, y=y)
         
         # Compute the EbN0 at the receiver
         received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
@@ -716,7 +693,13 @@ def generate_plot(df, xlabel, ylabel):
     plt.show()
     plt.close(fig)
     
-    
+
+def compute_large_scale_fading(d, f_c, pl_exp=2):
+    # l = c / f_c
+    # G = (4 * pi * d / l) ** pl_exp)
+    G = 1
+    return G
+        
 def run_simulation(file_name, codeword_size, h, constellation, k_constellation, sigmas, crc_polynomial, crc_length, n_pilot):
     alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
     data = read_bitmap(file_name)
@@ -748,7 +731,8 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
 
 
 # 1) Create a channel
-H = create_rayleigh_channel(N_r=N_r, N_t=N_t, G=1)
+G = compute_large_scale_fading(d=1, f_c=f_c)
+H = create_rayleigh_channel(N_r=N_r, N_t=N_t)
 
 # 2) Run the simulation on this channel
 df_output = run_simulation(file_name, codeword_size, H, constellation, 
