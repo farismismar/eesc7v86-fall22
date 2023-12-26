@@ -18,10 +18,7 @@ print(tf.config.list_physical_devices('GPU'))
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 import numpy as np
 import pandas as pd
-import pdb
 import matplotlib.pyplot as plt
-from keras import backend as K
-from scipy.linalg import hankel
 
 file_name = 'faris.bmp'
 
@@ -34,9 +31,6 @@ codeword_size = 16 # bits
 n_pilot = 20
 N_r = 16
 N_t = 16
-compression_ratio = 0.5 # try to make N_t, N_r power of two
-epoch_count = 250
-batch_size = 32
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
@@ -349,92 +343,8 @@ def _generate_pilot(N_r, N_t, n_pilot, random_state=None):
     # The training sequence is X_p.  It has N_t rows and n_pilot columns
     return X_p
     
-    
-def _cplex_mse(y_true, y_pred):
-    y_true = K.cast(y_true, tf.complex64) 
-    y_pred = K.cast(y_pred, tf.complex64) 
-    y_true = tf.reshape(y_true, [1, -1])
-    y_pred = tf.reshape(y_pred, [1, -1])
-    return K.mean(K.square(K.abs(y_true - y_pred)))
-    
-
-def _compress_channel(H, compression_ratio, epochs=10, batch_size=16, 
-                      training_split=None):
-    
-    if training_split is not None:
-        raise ValueError("Currently the channel is reported only once and thus there is no training data.  Revisit when multi-user channels are enabled.")
-        
-    # Compress the channel at the transmit side
-    # Then reconstruct it at the receive side
-    
-    from gan_inversion import Autoencoder
-    global seed
-    
-    N_r, N_t = H.shape
-    
-    if N_r != N_t:
-        raise ValueError("Compression only works for square H.")
-        
-    H = H.reshape((1, N_r, N_t))    
-    latent_dim = int(((1 - compression_ratio) * N_t) ** 2)
-    
-    autoencoder_re = Autoencoder(latent_dim, 
-                              shape=H.shape[1:], seed=seed)
-    autoencoder_re.compile(optimizer='adam', loss=_cplex_mse)
-    
-    # For the encoder to learn to compress, pass X_train as an input and target
-    # Decoder will learn how to reconstruct original 
-    X_train = np.real(H)
-    X_test = np.real(H)
-    
-    history_re = autoencoder_re.fit(X_train, X_train,
-                    epochs=epochs, batch_size=batch_size,
-                    shuffle=True, 
-                    validation_data=(X_test, X_test))
-    
-    # Encoded samples are compressed and the latent vector has a lower
-    # dimension as the result of compression.
-    H_re_compressed = autoencoder_re.encoder.predict(X_test) # This is a vectorized channel.
-    
-    # Decoder tries to reconstruct the true signal
-    H_re_reconstructed = autoencoder_re.decoder.predict(H_re_compressed)
-    
-    # Repeat but for imaginary part.  See p6 https://arxiv.org/pdf/1905.03761.pdf
-    autoencoder_im = Autoencoder(latent_dim, 
-                              shape=H.shape[1:], seed=seed)
-    autoencoder_im.compile(optimizer='adam', loss=_cplex_mse)
-    
-    X_train = np.imag(H)
-    X_test = np.imag(H)
-    
-    history_im = autoencoder_im.fit(X_train, X_train,
-                    epochs=epochs, batch_size=batch_size,
-                    shuffle=True,
-                    validation_data=(X_test, X_test))
-    
-    H_im_compressed = autoencoder_im.encoder.predict(X_test)
-    
-    H_im_reconstructed = autoencoder_im.decoder.predict(H_im_compressed)
-    
-    # Now reassemble the channel
-    H_compressed = H_re_compressed + 1j * H_im_compressed
-    H_reconstructed = H_re_reconstructed + 1j * H_im_reconstructed
-    
-    H = H.reshape((N_r, N_t))
-    H_reconstructed = H_reconstructed.reshape((N_r, N_t))
-
-    del H_re_compressed, H_im_compressed
-    del H_re_reconstructed, H_im_reconstructed
-    
-    error = _cplex_mse(H, H_reconstructed)
-    
-    return H_compressed, H_reconstructed, error.numpy()
-
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
-    global compression_ratio, epoch_count, batch_size, training_split
-    global compress_channel
-    
     SERs = []
     BERs = []
     block_error = 0
@@ -526,18 +436,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
-        if compress_channel:
-            # Now compress H_hat and enable receiver to reconstruct H_hat
-            H_compress, H_reconstructed, comp_channel_error = \
-                _compress_channel(H_hat, compression_ratio=compression_ratio, 
-                                  epochs=epoch_count, batch_size=batch_size)
-        else:
-            # No compression here.
-            H_reconstructed = H_hat
-            comp_channel_error = np.nan
-        
         # Channel equalization using ZF
-        W = _equalize_channel(H_reconstructed)
+        W = _equalize_channel(H_hat)
         
         # The optimal equalizer should fulfill W* H = I_{N_t}]
         x_sym_crc_hat = W.conjugate().transpose() @ Y
@@ -591,13 +491,12 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Now extract from every transmission 
     data_rx_ = ''.join(data_rx)
     
-    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_, comp_channel_error
+    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_
 
 
 def read_bitmap(file):
     # This is a 32x32 pixel image
     im_orig = plt.imread(file)
-    #im_orig = im_orig[:32, :32, :]  # 32x32x3
     
     im = im_orig.reshape(1, -1)[0]
     im = [bin(a)[2:].zfill(8) for a in im]
@@ -662,16 +561,15 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
 
     plot_bitmaps(data, data)
     
-    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER', 'Channel_Error'])
+    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received, chan_err_comp = \
+        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = \
             transmit_receive(data, codeword_size, alphabet, h, k_constellation, sigma ** 2, crc_polynomial, crc_length, n_pilot)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
         df_output_['BLER'] = BLER_i
         df_output_['Rx_EbN0'] = Rx_EbN0_i
-        df_output_['Channel_Error'] = chan_err_comp
         
         plot_bitmaps(data, data_received)
         
