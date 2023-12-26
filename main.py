@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 file_name = 'faris.bmp' # Payload to be transmitted
 
 # System parameters
-compress_channel = True
 constellation = 'QAM'
 M_constellation = 64
 seed = 7
