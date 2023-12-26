@@ -8,6 +8,21 @@ Created on Thu Oct 12 16:19:40 2023
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+
+import pdb
+
+import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
+if os.name == 'nt':
+    os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
+
+import tensorflow as tf
+print(tf.config.list_physical_devices('GPU'))
+
+# The GPU ID to use, usually either "0" or "1" based on previous line.
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 
 file_name = 'faris.bmp' # Payload to be transmitted
 
@@ -25,6 +40,8 @@ crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
 sigmas = np.sqrt(np.logspace(-4, -1, num=6)) # square root of noise power
+
+prefer_gpu = True
 ##################
 
 plt.rcParams['font.family'] = "Arial"
@@ -35,14 +52,14 @@ k_constellation = int(np.log2(M_constellation))
 
 def create_constellation(constellation, M):
     if (constellation == 'QPSK'):
-        return create_constellation_psk(M)
+        return _create_constellation_psk(M)
     elif (constellation == 'QAM'):
-        return create_constellation_qam(M)
+        return _create_constellation_qam(M)
     else:
         return None
      
 # Constellation based on Gray code
-def create_constellation_psk(M):
+def _create_constellation_psk(M):
     k = np.log2(M)
     if k != int(k): # only square constellations are allowed.
         print('Only square PSK constellations allowed.')
@@ -74,7 +91,7 @@ def create_constellation_psk(M):
 
 
 # Constellation based on Gray code
-def create_constellation_qam(M):
+def _create_constellation_qam(M):
     k = np.log2(M)
     if k != int(k): # only square QAM is allowed.
         print('Only square QAM constellations allowed.')
@@ -240,6 +257,141 @@ def create_rayleigh_channel(N_r, N_t, G=1):
     return H
 
 
+
+def _create_dnn(input_shape, depth=5, width=10):
+    mX, nX = input_shape
+    nY = 1 # do not change it
+    
+    model = keras.Sequential()
+    
+    for hidden in range(depth):
+       model.add(layers.Dense(width, activation='sigmoid'))
+       
+
+    model.add(layers.Dense(nY, activation='softmax'))
+    
+    model.compile(loss=my_loss_fn_classifier, optimizer='adam', 
+                  metrics=[tf.keras.metrics.Precision()]) # Never use accuracy!
+    
+    # Reporting the number of parameters
+    print(model.summary())
+    
+    num_params = model.count_params()
+    print('Number of parameters: {}'.format(num_params))
+    
+    
+    
+    model.compile(loss='sparse_categorical_crossentropy', 
+                  optimizer=keras.optimizers.SGD(learning_rate=learning_rate, momentum=momentum), 
+                  metrics=['accuracy', 'sparse_categorical_crossentropy'])
+    
+    return model
+
+# TODO: Incomplete
+def _DNN_detect_symbol(x_sym_hat, alphabet):
+    global prefer_gpu
+    
+    dnn_classifier = DeepNeuralNetworkClassifier(
+        seed=self.seed, prefer_gpu=self.prefer_gpu)
+    
+    df_predictions = pd.DataFrame()
+    for streams in range(1, N_t + 1):
+   
+        X_ = X.filter(regex=f'{streams}')
+        y_ = y.filter(regex=f'{streams}')
+        
+        X_test_, y_test_ = dnn_classifier.train(X_, y_,
+                    train_size=train_size, n_epochs=n_epochs, 
+                    batch_size=batch_size)
+        acc, y_pred_ = dnn_classifier.test(X_test_, y_test_)
+        
+        df_predictions_s = pd.DataFrame(data={'stream': streams,
+                                              'm_true': y_test_,
+                                              'm_pred_dnn': y_pred_})
+        df_predictions = pd.concat([df_predictions, df_predictions_s], axis=0)
+
+    df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_dnn']).astype(int)
+
+    df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
+
+    # This is the correct way to calculate accuracy.  Why?
+    weighted_average_accuracy = df_predictions['match'].mean()
+    
+    # This should match the weighted accuracy if streams are equally likely
+    arithmetic_average_accuracy = df_pred_branch['match'].mean()
+    
+    return information, symbols, [bits_i, bits_q], bits
+
+
+def _unsupervised_detection(x_sym_hat, alphabet):
+    global np_random, M_constellation
+    
+    x_sym_hat_flat = x_sym_hat.flatten()
+
+    X = np.real(x_sym_hat_flat)
+    X = np.c_[X, np.imag(x_sym_hat_flat)]
+    X = X.astype('float32')
+    
+    centroids = alphabet[['x_I', 'x_Q']].values
+    centroids = centroids.astype('float32')
+    
+    # Intialize k-means centroid location deterministcally as a constellation
+    kmeans = KMeans(n_clusters=M_constellation, init=centroids, n_init=1, 
+                    random_state=np_random).fit(centroids)
+    
+    information = kmeans.predict(X).reshape(x_sym_hat.shape)
+    df_information = pd.DataFrame(data={'m': information})
+    
+    df = df_information.merge(alphabet, how='left', on='m')
+    symbols = df['x'].values.reshape(x_sym_hat.shape)
+    bits_i = df['I'].values.reshape(x_sym_hat.shape)
+    bits_q = df['Q'].values.reshape(x_sym_hat.shape) 
+    
+    bits = []
+    for s in range(x_sym_hat_flat.shape[0]):
+        bits.append(f'{bits_i[s]}{bits_q[s]}')
+        
+    bits = np.array(bits).reshape(x_sym_hat.shape)    
+
+    return information, symbols, [bits_i, bits_q], bits
+
+
+# TODO: Incomplete
+def _ensemble_detection(x_sym_hat, alphabet):
+
+    X = df.filter(regex='y_|n_|r_|v_|x_hat') # everything except m and true x
+    y = df.filter(regex='m_[0-9]+') # clearly m_hat is not welcome :)
+    
+    classifier = EnsembleClassifier(
+        seed=self.seed, prefer_gpu=self.prefer_gpu, is_booster=False)
+    
+    df_predictions = pd.DataFrame()
+    for streams in range(1, N_t + 1):
+   
+        X_ = X.filter(regex=f'{streams}')
+        y_ = y.filter(regex=f'{streams}')
+        
+        X_test_, y_test_ = classifier.train(X_, y_, train_size=train_size)
+        acc, y_pred_ = classifier.test(X_test_, y_test_)
+        
+        df_predictions_s = pd.DataFrame(data={'stream': streams,
+                                              'm_true': y_test_.values.ravel(),
+                                              'm_pred_rf': y_pred_})
+        df_predictions = pd.concat([df_predictions, df_predictions_s], axis=0)
+
+    df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_rf']).astype(int)
+
+    df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
+
+    # This is the correct way to calculate accuracy.  Why?
+    weighted_average_accuracy = df_predictions['match'].mean()
+    
+    # This should match the weighted accuracy if streams are equally likely
+    arithmetic_average_accuracy = df_pred_branch['match'].mean()
+    
+    return information, symbols, [bits_i, bits_q], bits
+
+    
 def ML_detect_symbol(x_sym_hat, alphabet):
     df_information = pd.DataFrame()
     x_sym_hat_flat = x_sym_hat.flatten()
@@ -276,7 +428,17 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     return information, symbols, [bits_i, bits_q], bits
 
 
-def _equalize_channel(H):
+def quantize(Y, b):
+    if b == np.inf:
+        return Y
+    else:
+        # TODO:  Introduce quantization for any other b.
+        print("WARNING:  No quantization is performed.")
+        
+    return Y
+
+
+def equalize_channel(H):
     global N_t, N_r
     
     # ZF equalization
@@ -287,7 +449,7 @@ def _equalize_channel(H):
     return W
 
         
-def _estimate_channel(X_p, Y_p, noise_power, random_state=None):
+def estimate_channel(X_p, Y_p, noise_power, random_state=None):
     # This is for least square (LS) estimation
     # and the linear minimum mean squared error (L-MMSE):
     N_t, _ = X_p.shape
@@ -304,7 +466,7 @@ def _estimate_channel(X_p, Y_p, noise_power, random_state=None):
     return H_hat
   
 
-def _generate_pilot(N_r, N_t, n_pilot, random_state=None):
+def generate_pilot(N_r, N_t, n_pilot, random_state=None):
     # Check if the dimensions are valid for the operation
     if n_pilot < N_t:
         raise ValueError("The length of the training sequence should be greater than or equal to the number of transmit antennas.")
@@ -409,15 +571,18 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Channel
         Y = H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
         
+        # Quantize Y
+        Y = quantize(Y, b=np.inf)
+        
         # Pilot contribution (known sequence)
         # Generate pilot
-        P = _generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
+        P = generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
         
         # Channel
         T = H@P + n
     
         # Estimate the channel
-        H_hat = _estimate_channel(P, T, noise_power, random_state=np_random)
+        H_hat = estimate_channel(P, T, noise_power, random_state=np_random)
         
         error_vector = _vec(H) - _vec(H_hat)
         
@@ -425,7 +590,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Channel equalization using ZF
-        W = _equalize_channel(H_hat)
+        W = equalize_channel(H_hat)
         
         # The optimal equalizer should fulfill W* H = I_{N_t}]
         x_sym_crc_hat = W.conjugate().transpose() @ Y
@@ -438,7 +603,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
             x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
         
         # Detection of symbols (symbol star is the centroid of the constellation)        
-        x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
+        pdb.set_trace()
+        # x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
+        x_info_hat, _, _, x_bits_hat = _unsupervised_detection(x_sym_hat, alphabet)
         x_bits_hat = ''.join(x_bits_hat)
         
         # Compute the EbN0 at the receiver
@@ -514,7 +681,7 @@ def _convert_to_bytes_decimal(data):
     return data_vector
 
 
-def plot_bitmaps(data1, data2):
+def _plot_bitmaps(data1, data2):
     fig, [ax1, ax2] = plt.subplots(nrows=1, ncols=2)
     
     ax1.imshow(_convert_to_bytes_decimal(data1))
@@ -547,7 +714,7 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
     data = read_bitmap(file_name)
 
-    plot_bitmaps(data, data)
+    _plot_bitmaps(data, data)
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
@@ -559,7 +726,7 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
         df_output_['BLER'] = BLER_i
         df_output_['Rx_EbN0'] = Rx_EbN0_i
         
-        plot_bitmaps(data, data_received)
+        _plot_bitmaps(data, data_received)
         
         if df_output.shape[0] == 0:
             df_output = df_output_.copy()
