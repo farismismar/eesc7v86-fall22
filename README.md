@@ -8,7 +8,7 @@ Channel estimation is performed through the use of least squares and linear mini
 
 Channel equalization is performed through the choices of zero forcing and minimum mean squared error (MMSE) equalizers.
 
-Symbol detection is performed through four different algorithms: 1) maximum likelihood 2) unsupervised learning 3) fully connected deep neural networks and 4) ensemble learning.
+Symbol detection is performed through four different algorithms: 1) maximum likelihood 2) unsupervised learning and 3) fully connected deep neural networks.
 
 Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), Eb/N0 (both TX and RX), symbol error rate per stream, bit error rate per stream, and block error rate.
 
@@ -17,9 +17,9 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following paper:
 
 `@misc{mlwirelesscomm,
-title={A Tutorial on Machine Learning in Wireless Networks},
+title={A Quick Primer on Machine Learning in Wireless Communications},
 author={Mismar, F. B.},
-year={2022},
+year={2023},
 eprint={220x.yyyy},
 archivePrefix={arXiv},
 primaryClass={cs.IT}
