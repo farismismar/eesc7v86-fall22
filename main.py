@@ -5,22 +5,11 @@ Created on Thu Oct 12 16:19:40 2023
 @author: farismismar
 """
 
-import os
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-
-if os.name == 'nt':
-    os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
-
-import tensorflow as tf
-print(tf.config.list_physical_devices('GPU'))
-
-# The GPU ID to use, usually either "0" or "1" based on previous line.
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-file_name = 'faris.bmp'
+file_name = 'faris.bmp' # Payload to be transmitted
 
 # System parameters
 compress_channel = True
