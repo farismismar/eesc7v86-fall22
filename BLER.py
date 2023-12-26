@@ -299,6 +299,7 @@ def _equalize_channel(H):
     
     # ZF equalization
     W = np.linalg.pinv(H)
+    
     assert(W.shape == (N_r, N_t))
     
     return W
@@ -419,6 +420,9 @@ def _compress_channel(H, compression_ratio, epochs=10, batch_size=16,
     H_compressed = H_re_compressed + 1j * H_im_compressed
     H_reconstructed = H_re_reconstructed + 1j * H_im_reconstructed
     
+    H = H.reshape((N_r, N_t))
+    H_reconstructed = H_reconstructed.reshape((N_r, N_t))
+
     del H_re_compressed, H_im_compressed
     del H_re_reconstructed, H_im_reconstructed
     
