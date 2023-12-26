@@ -42,6 +42,7 @@ class Autoencoder(Model):
         self.latent_dim = latent_dim
         self.shape = shape
         
+        # Compresses
         self.encoder = tf.keras.Sequential(name='encoder')
         self.encoder.add(layers.Flatten())
         self.encoder.add(layers.Dense(8, activation='relu'))
@@ -54,7 +55,7 @@ class Autoencoder(Model):
         # self.encoder.add(layers.Conv2D(32, (latent_dim, latent_dim), strides=(2,2), activation='relu', padding='same'))
         # self.encoder.add(layers.MaxPooling2D((2,2), padding='same'))
         
-        
+        # Decompresses
         self.decoder = tf.keras.Sequential(name='decoder')
         self.decoder.add(layers.Dense(32, activation='relu'))
         self.decoder.add(layers.Dense(tf.math.reduce_prod(shape), 

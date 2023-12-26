@@ -37,7 +37,6 @@ N_t = 16
 compression_ratio = 0.5 # try to make N_t, N_r power of two
 epoch_count = 250
 batch_size = 32
-training_split = 0.8
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
@@ -296,13 +295,12 @@ def ML_detect_symbol(x_sym_hat, alphabet):
 
 
 def _equalize_channel(H):
-    # Matched filter.
-    # W = np.conjugate(H) / (np.linalg.norm(H, 2) ** 2)
+    global N_t, N_r
     
     # ZF equalization
     W = np.linalg.pinv(H)
+    assert(W.shape == (N_r, N_t))
     
-    assert(W.shape == (N_r, N_r))    
     return W
 
         
@@ -360,61 +358,73 @@ def _cplex_mse(y_true, y_pred):
     
 
 def _compress_channel(H, compression_ratio, epochs=10, batch_size=16, 
-                      training_split=0.5):
+                      training_split=None):
+    
+    if training_split is not None:
+        raise ValueError("Currently the channel is reported only once and thus there is no training data.  Revisit when multi-user channels are enabled.")
+        
+    # Compress the channel at the transmit side
+    # Then reconstruct it at the receive side
+    
     from gan_inversion import Autoencoder
     global seed
     
     N_r, N_t = H.shape
     
-    latent_dim = N_t
+    if N_r != N_t:
+        raise ValueError("Compression only works for square H.")
+        
+    H = H.reshape((1, N_r, N_t))    
+    latent_dim = int(((1 - compression_ratio) * N_t) ** 2)
     
-    compressed_latent_dim = int((1 - compression_ratio) * latent_dim)
-    training_size = int(training_split * N_r)
-    
-    autoencoder_re = Autoencoder(compressed_latent_dim, 
+    autoencoder_re = Autoencoder(latent_dim, 
                               shape=H.shape[1:], seed=seed)
     autoencoder_re.compile(optimizer='adam', loss=_cplex_mse)
     
-    # For the encoder to learn to compress, pass x_train as an input and target
+    # For the encoder to learn to compress, pass X_train as an input and target
     # Decoder will learn how to reconstruct original 
-    x_train = np.real(H[:training_size, :])
-    x_test = np.real(H[training_size:, :])
+    X_train = np.real(H)
+    X_test = np.real(H)
     
-    history_re = autoencoder_re.fit(x_train, x_train,
+    history_re = autoencoder_re.fit(X_train, X_train,
                     epochs=epochs, batch_size=batch_size,
-                    shuffle=False,
-                    validation_data=(x_test, x_test))
+                    shuffle=True, 
+                    validation_data=(X_test, X_test))
     
     # Encoded samples are compressed and the latent vector has a lower
     # dimension as the result of compression.
-    h_re_compressed = autoencoder_re.encoder.predict(x_test)
+    H_re_compressed = autoencoder_re.encoder.predict(X_test) # This is a vectorized channel.
     
     # Decoder tries to reconstruct the true signal
-    h_re_reconstructed = autoencoder_re.decoder.predict(h_re_compressed)
+    H_re_reconstructed = autoencoder_re.decoder.predict(H_re_compressed)
     
     # Repeat but for imaginary part.  See p6 https://arxiv.org/pdf/1905.03761.pdf
-    autoencoder_im = Autoencoder(compressed_latent_dim, 
+    autoencoder_im = Autoencoder(latent_dim, 
                               shape=H.shape[1:], seed=seed)
     autoencoder_im.compile(optimizer='adam', loss=_cplex_mse)
     
-    x_train = np.imag(H[:training_size, :])
-    x_test = np.imag(H[training_size:, :])
+    X_train = np.imag(H)
+    X_test = np.imag(H)
     
-    history_im = autoencoder_im.fit(x_train, x_train,
+    history_im = autoencoder_im.fit(X_train, X_train,
                     epochs=epochs, batch_size=batch_size,
-                    shuffle=False,
-                    validation_data=(x_test, x_test))
-    h_im_compressed = autoencoder_im.encoder.predict(x_test)
-    h_im_reconstructed = autoencoder_im.decoder.predict(h_im_compressed)
-
-    h_compressed = h_re_compressed + 1j * h_im_compressed
-    h_reconstructed = h_re_reconstructed + 1j * h_im_reconstructed
-    del h_re_compressed, h_im_compressed
-    del h_re_reconstructed, h_im_reconstructed
+                    shuffle=True,
+                    validation_data=(X_test, X_test))
     
-    error = _cplex_mse(H[training_size:, :], h_reconstructed)
+    H_im_compressed = autoencoder_im.encoder.predict(X_test)
     
-    return h_compressed, h_reconstructed, error.numpy()
+    H_im_reconstructed = autoencoder_im.decoder.predict(H_im_compressed)
+    
+    # Now reassemble the channel
+    H_compressed = H_re_compressed + 1j * H_im_compressed
+    H_reconstructed = H_re_reconstructed + 1j * H_im_reconstructed
+    
+    del H_re_compressed, H_im_compressed
+    del H_re_reconstructed, H_im_reconstructed
+    
+    error = _cplex_mse(H, H_reconstructed)
+    
+    return H_compressed, H_reconstructed, error.numpy()
 
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
@@ -513,11 +523,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         if compress_channel:
-            # Now compress h_hat
+            # Now compress H_hat and enable receiver to reconstruct H_hat
             H_compress, H_reconstructed, comp_channel_error = \
                 _compress_channel(H_hat, compression_ratio=compression_ratio, 
-                                  epochs=epoch_count, batch_size=batch_size, 
-                                  training_split=training_split)
+                                  epochs=epoch_count, batch_size=batch_size)
         else:
             # No compression here.
             H_reconstructed = H_hat
@@ -526,7 +535,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Channel equalization using ZF
         W = _equalize_channel(H_reconstructed)
         
-        # The optimal equalizer should fulfill W*H = I.
+        # The optimal equalizer should fulfill W* H = I_{N_t}]
         x_sym_crc_hat = W.conjugate().transpose() @ Y
         
         # crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
