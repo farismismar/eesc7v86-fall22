@@ -1,4 +1,4 @@
-# Machine Learning in Wireless Communications
+# EESC 7v86: Machine Learning in Wireless Communications
 
 This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel with Rayleigh fading and both QAM and QPSK symbols (Gray coded).
 
