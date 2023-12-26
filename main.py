@@ -24,9 +24,14 @@ print(tf.config.list_physical_devices('GPU'))
 # The GPU ID to use, usually either "0" or "1" based on previous line.
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
 
-file_name = 'faris.bmp' # Payload to be transmitted
+from tensorflow import keras
+from tensorflow.keras import layers, optimizers
+from tensorflow.compat.v1 import set_random_seed
+
+from sklearn.preprocessing import MinMaxScaler
 
 # System parameters
+file_name = 'faris.bmp' # Payload to be transmitted
 constellation = 'QAM'
 M_constellation = 64
 seed = 7
@@ -44,6 +49,10 @@ sigmas = np.sqrt(np.logspace(-4, -1, num=6)) # square root of noise power
 prefer_gpu = True
 ##################
 
+__release_date__ = '2023-12-26'
+__ver__ = '0.40'
+
+##################
 plt.rcParams['font.family'] = "Arial"
 plt.rcParams['font.size'] = "14"
 
@@ -258,20 +267,25 @@ def create_rayleigh_channel(N_r, N_t, G=1):
 
 
 
+def _loss_fn_classifier(y_true, y_pred):
+    bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    return bce(y_true, y_pred)
+
+
 def _create_dnn(input_shape, depth=5, width=10):
     mX, nX = input_shape
     nY = 1 # do not change it
     
     model = keras.Sequential()
+    model.add(keras.Input(shape=input_shape))
     
     for hidden in range(depth):
-       model.add(layers.Dense(width, activation='sigmoid'))
-       
-
+        model.add(layers.Dense(width, activation='sigmoid'))
+   
     model.add(layers.Dense(nY, activation='softmax'))
     
-    model.compile(loss=my_loss_fn_classifier, optimizer='adam', 
-                  metrics=[tf.keras.metrics.Precision()]) # Never use accuracy!
+    model.compile(loss=_loss_fn_classifier, optimizer='adam', 
+                  metrics=['accuracy', 'categorical_crossentropy']) # Accuracy here is okay.
     
     # Reporting the number of parameters
     print(model.summary())
@@ -279,20 +293,43 @@ def _create_dnn(input_shape, depth=5, width=10):
     num_params = model.count_params()
     print('Number of parameters: {}'.format(num_params))
     
-    
-    
-    model.compile(loss='sparse_categorical_crossentropy', 
-                  optimizer=keras.optimizers.SGD(learning_rate=learning_rate, momentum=momentum), 
-                  metrics=['accuracy', 'sparse_categorical_crossentropy'])
-    
     return model
 
+
 # TODO: Incomplete
-def _DNN_detect_symbol(x_sym_hat, alphabet):
+def _DNN_detect_symbol(x_sym_hat, alphabet, train_split=0.6, depth=5, width=2):
     global prefer_gpu
     
-    dnn_classifier = DeepNeuralNetworkClassifier(
-        seed=self.seed, prefer_gpu=self.prefer_gpu)
+    use_cuda = len(tf.config.list_physical_devices('GPU')) > 0 and prefer_gpu
+    device = "/gpu:0" if use_cuda else "/cpu:0"
+  
+    x_sym_hat_flat = x_sym_hat.flatten()
+
+    X = np.real(x_sym_hat_flat)
+    X = np.c_[X, np.imag(x_sym_hat_flat)]
+    X = X.astype('float32')
+    
+    training_data = int(train_split * len(x_sym_hat_flat))
+    
+    dnn_classifier = _create_dnn(depth=depth, width=width)
+    
+    x_train = alphabet
+    
+    
+    
+    
+    
+    x_test = x_sym_hat_flat[training_data:]
+    
+    x_train = sc.fit_transform(x_train)
+    x_test = sc.transform(x_test)
+      
+    with tf.device(device)::
+        dnn_classifier.fit(x_train, )
+        
+        
+        
+        
     
     df_predictions = pd.DataFrame()
     for streams in range(1, N_t + 1):
@@ -359,35 +396,6 @@ def _unsupervised_detection(x_sym_hat, alphabet):
 # TODO: Incomplete
 def _ensemble_detection(x_sym_hat, alphabet):
 
-    X = df.filter(regex='y_|n_|r_|v_|x_hat') # everything except m and true x
-    y = df.filter(regex='m_[0-9]+') # clearly m_hat is not welcome :)
-    
-    classifier = EnsembleClassifier(
-        seed=self.seed, prefer_gpu=self.prefer_gpu, is_booster=False)
-    
-    df_predictions = pd.DataFrame()
-    for streams in range(1, N_t + 1):
-   
-        X_ = X.filter(regex=f'{streams}')
-        y_ = y.filter(regex=f'{streams}')
-        
-        X_test_, y_test_ = classifier.train(X_, y_, train_size=train_size)
-        acc, y_pred_ = classifier.test(X_test_, y_test_)
-        
-        df_predictions_s = pd.DataFrame(data={'stream': streams,
-                                              'm_true': y_test_.values.ravel(),
-                                              'm_pred_rf': y_pred_})
-        df_predictions = pd.concat([df_predictions, df_predictions_s], axis=0)
-
-    df_predictions['match'] = (df_predictions['m_true'] == df_predictions['m_pred_rf']).astype(int)
-
-    df_pred_branch = df_predictions.groupby(['stream']).mean()['match'].reset_index()
-
-    # This is the correct way to calculate accuracy.  Why?
-    weighted_average_accuracy = df_predictions['match'].mean()
-    
-    # This should match the weighted accuracy if streams are equally likely
-    arithmetic_average_accuracy = df_pred_branch['match'].mean()
     
     return information, symbols, [bits_i, bits_q], bits
 
@@ -602,10 +610,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         if pad_length > 0:
             x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
         
-        # Detection of symbols (symbol star is the centroid of the constellation)        
-        pdb.set_trace()
-        # x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
-        x_info_hat, _, _, x_bits_hat = _unsupervised_detection(x_sym_hat, alphabet)
+        # Detection of symbols (symbol star is the centroid of the constellation)
+        x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
+        # x_info_hat, _, _, x_bits_hat = _unsupervised_detection(x_sym_hat, alphabet)
         x_bits_hat = ''.join(x_bits_hat)
         
         # Compute the EbN0 at the receiver
