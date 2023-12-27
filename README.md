@@ -14,7 +14,7 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 
 ## Citation
 
-If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following paper:
+If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following preprint to keep track of the impact.
 
 `@misc{mlwirelesscomm,
 title={A Quick Primer on Machine Learning in Wireless Communications},
