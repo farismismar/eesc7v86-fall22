@@ -36,3 +36,4 @@ primaryClass={cs.IT}
 | 0.2      | 2022-02-24 | Further features |
 | 0.3      | 2022-03-07 | Further improvements and bug fixes |
 | 0.4      | 2023-12-26 | Miscellaneous bug fixes and public release |
+| 0.41     | 2023-12-27 | Minor fixes |
