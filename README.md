@@ -12,6 +12,8 @@ Symbol detection is performed through four different algorithms: 1) maximum like
 
 Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), Eb/N0 (both TX and RX), symbol error rate per stream, bit error rate per stream, and block error rate.
 
+The additional file `PlottingUtils.py` is a class used to plot probability density functions and cumulative distribution functions for various configurations (joint, marginal, multiplot).
+
 ## Citation
 
 If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following preprint to keep track of the impact.
