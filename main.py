@@ -53,8 +53,8 @@ sigmas = np.sqrt(np.logspace(-1, 2, num=6)) # square root of noise power
 prefer_gpu = True
 ##################
 
-__release_date__ = '2023-12-26'
-__ver__ = '0.40'
+__release_date__ = '2023-12-27'
+__ver__ = '0.41'
 
 ##################
 plt.rcParams['font.family'] = "Arial"
@@ -430,6 +430,7 @@ def equalize_channel(H):
 
         
 def estimate_channel(X_p, Y_p, noise_power, random_state=None):
+    global G
     # This is for least square (LS) estimation
     # and the linear minimum mean squared error (L-MMSE):
     N_t, _ = X_p.shape
@@ -438,10 +439,10 @@ def estimate_channel(X_p, Y_p, noise_power, random_state=None):
         raise ValueError("The training sequence is not semi-unitary.  Cannot estimate the channel.")
     
     # This is least square (LS) estimation
-    H_hat_ls = Y_p@X_p.conjugate().T
+    H_hat_ls = 1. / np.sqrt(G) * Y_p@X_p.conjugate().T
     
     # This is the L-MMSE estimation:
-    H_hat = H_hat_ls@np.linalg.inv(np.eye(N_t) * (1 + noise_power))
+    H_hat = np.sqrt(G) * Y_p@X_p.conjugate().T@np.linalg.inv((G + noise_power)*np.eye(N_t))
     
     return H_hat
   
