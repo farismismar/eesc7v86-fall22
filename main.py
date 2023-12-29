@@ -48,7 +48,7 @@ f_c = 1.8e6 # in Hz
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-1, 2, num=6)) # square root of noise power
+sigmas = np.sqrt(np.logspace(-2, 4, num=6)) # square root of noise power
 
 prefer_gpu = True
 ##################
@@ -480,6 +480,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     BERs = []
     block_error = 0
     
+    global G
+    
     N_r, N_t = H.shape
     
     Df = 15e3 # subcarrier in Hz
@@ -507,9 +509,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     
     b = len(data)
     n_transmissions = int(np.ceil(b / (codeword_size * N_t)))
-     
-    # Find G from the normalized channel
-    G = np.trace(H.conjugate().T@H) / (N_r * N_t)
     
     x_info_complete = bits_to_symbols(data, alphabet, k)
     
@@ -547,10 +546,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Debug purposes
         if perfect_csi:
             n = np.zeros((N_r, n_pilot))
-            H = np.eye(N_t)
+            H = np.sqrt(G) * np.eye(N_t)
             
         # Channel
-        Y = H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
+        Y = np.sqrt(G) * H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
         
         # Quantize Y
         Y = quantize(Y, b=np.inf)
@@ -560,7 +559,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         P = generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
         
         # Channel
-        T = H@P + n
+        T = np.sqrt(G) * H@P + n
     
         # Estimate the channel
         H_hat = estimate_channel(P, T, noise_power, random_state=np_random)
@@ -696,9 +695,9 @@ def generate_plot(df, xlabel, ylabel):
     
 
 def compute_large_scale_fading(d, f_c, pl_exp=2):
-    # l = c / f_c
-    # G = (4 * pi * d / l) ** pl_exp)
-    G = 1
+    l = c / f_c
+    G = (4 * pi * d / l) ** pl_exp
+
     return G
         
 def run_simulation(file_name, codeword_size, h, constellation, k_constellation, sigmas, crc_polynomial, crc_length, n_pilot):
@@ -710,7 +709,8 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
         SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = \
-            transmit_receive(data, codeword_size, alphabet, h, k_constellation, sigma ** 2, crc_polynomial, crc_length, n_pilot)
+            transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
+                         sigma ** 2, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
         df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
         df_output_['Avg_BER'] = BER_i
         df_output_['noise_power'] = sigma ** 2
