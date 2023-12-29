@@ -70,7 +70,8 @@ def create_constellation(constellation, M):
         return _create_constellation_qam(M)
     else:
         return None
-     
+
+
 # Constellation based on Gray code
 def _create_constellation_psk(M):
     k = np.log2(M)
