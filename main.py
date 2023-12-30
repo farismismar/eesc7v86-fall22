@@ -500,12 +500,13 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     B = Nsc * Df # Transmit bandwidth
     print(f'Transmission BW = {B:.2f} Hz')
     
+    # Normalize symbol power (energy)
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
     Tx_SNR = 10*np.log10(Es / (N_t * noise_power))
     
     N0 = noise_power / B
     Tx_EbN0 = 10 * np.log10((Es/(N_t * k)) / N0)
-    print(f'SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
+    print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
     
     b = len(data)
@@ -539,6 +540,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
 
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
+        
+        # Normalize the transmitted MIMO signal
+        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2) * np.sqrt(N_t)
         
         # Additive noise
         n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot)) + \
