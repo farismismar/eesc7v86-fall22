@@ -43,6 +43,7 @@ n_pilot = 20
 N_r = 16
 N_t = 16
 f_c = 1.8e6 # in Hz
+P_BS = 40 # Watts
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
@@ -477,12 +478,12 @@ def generate_pilot(N_r, N_t, n_pilot, random_state=None):
     
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
+    global G, P_BS
+    
     SERs = []
     BERs = []
     block_error = 0
-    
-    global G
-    
+        
     N_r, N_t = H.shape
     
     Df = 15e3 # subcarrier in Hz
@@ -541,8 +542,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
         
-        # Normalize the transmitted MIMO signal
-        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2) * np.sqrt(N_t)
+        # Normalize the transmitted MIMO signal so the squared norm of x is equal to P / N_t.
+        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2) * np.sqrt(N_t / P_BS)
         
         # Additive noise
         n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot)) + \
