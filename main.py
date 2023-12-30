@@ -505,7 +505,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     Tx_SNR = 10*np.log10(Es / (N_t * noise_power))
     
     N0 = noise_power / B
-    Tx_EbN0 = 10 * np.log10((Es/(N_t * k)) / N0)
+    Tx_EbN0 = 10 * np.log10(Es / (k * N_t * N0))
     print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
     
