@@ -37,19 +37,19 @@ from sklearn.preprocessing import MinMaxScaler
 # System parameters
 file_name = 'faris.bmp' # Payload to be transmitted
 constellation = 'QAM'
-M_constellation = 64
+M_constellation = 16
 seed = 7
 codeword_size = 16 # bits
-n_pilot = 20
-N_r = 16
-N_t = 16
+n_pilot = 6
+N_r = 4
+N_t = 4
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-2, 4, num=6)) # square root of noise power
+sigmas = [0] # np.sqrt(np.logspace(-6, -2, num=6)) # square root of noise power 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
@@ -92,15 +92,13 @@ def _create_constellation_psk(M):
         else:
             centroids = pd.concat([centroids, centroid_], ignore_index=True)
     
-    # Normalize the transmitted symbols
-    signal_power = np.sum(centroids['x_I'] ** 2 + centroids['x_Q'] ** 2) / M
-
-    centroids[['x_I', 'x_Q']] /= np.sqrt(signal_power)
-    centroids.loc[:, 'x'] = centroids.loc[:, 'x_I'] + 1j * centroids.loc[:, 'x_Q']
-    
     gray = centroids['m'].apply(lambda x: decimal_to_gray(x, k))
     centroids['I'] = gray.str[:(k//2)]
     centroids['Q'] = gray.str[(k//2):]
+
+    # Normalize the transmitted symbols    
+    centroids.loc[:, 'x'] = centroids.loc[:, 'x_I'] + 1j * centroids.loc[:, 'x_Q']
+    centroids.loc[:, 'x'] = centroids['x'].apply(lambda x: x/abs(x))
     
     return centroids
 
@@ -141,13 +139,10 @@ def _create_constellation_qam(M):
     gray = constellation['m'].apply(lambda x: decimal_to_gray(x, k))
     constellation['I'] = gray.str[:(k//2)]
     constellation['Q'] = gray.str[(k//2):]
-    
-    # Normalize the transmitted symbols
-    signal_power = np.sum(constellation['x_I'] ** 2 + \
-                           constellation['x_Q'] ** 2) / M
-    
-    constellation[['x_I', 'x_Q']] /= np.sqrt(signal_power)
+        
+    # Normalize the transmitted symbols    
     constellation.loc[:, 'x'] = constellation.loc[:, 'x_I'] + 1j * constellation.loc[:, 'x_Q']
+    constellation.loc[:, 'x'] = constellation['x'].apply(lambda x: x/abs(x))
     
     return constellation
 
@@ -473,7 +468,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     SERs = []
     BERs = []
     block_error = 0
-        
+    
     N_r, N_t = H.shape
     
     Df = 15e3 # subcarrier in Hz
@@ -482,21 +477,35 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Effective codeword size, must coincide with integer number of symbols
     codeword_size = int(np.ceil(codeword_size / k) * k)
     
-    bit_rate = codeword_size / tti * N_t
-    print(f'Transmission maximum rate = {bit_rate:.2f} bps')
+    # Bit rate 
+    bit_rate = codeword_size / tti
+
+    # Number of streams
+    N_s = min(N_r, N_t)
+    bit_rate_per_stream = bit_rate / N_s
+
+    print(f'Transmission maximum bitrate per stream = {bit_rate_per_stream:.2f} bps')
     
     # Find the correct number of subcarriers required for this bit rate
     # assuming 1:1 code rate.
-    Nsc = np.ceil(bit_rate / (k * Df))    # Number of OFDM subcarriers
+    Nsc = np.ceil(bit_rate_per_stream / (k * Df))    # Number of OFDM subcarriers
     B = Nsc * Df # Transmit bandwidth
-    print(f'Transmission BW = {B:.2f} Hz')
+    print(f'Transmission BW per stream = {B:.2f} Hz')
+    
+    # Note that bit_rate / B cannot exceed k.
+    # Thus if bandwidth became B N_s due to spatial multiplexing, then the bit rate also scales by N_s.
+    assert(k >= bit_rate_per_stream / B)
     
     # Normalize symbol power (energy)
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
+    assert(np.isclose(Es, 1.))
+    
     Tx_SNR = 10*np.log10(G * Es / (N_t * noise_power))
     
-    N0 = noise_power / B
-    Tx_EbN0 = 10 * np.log10(G * Es / (k * N_t * N0))
+    # Note that N0 = noise_power / B
+    # Tx_EbN0 = 10 * np.log10(B / (noise_power * bit_rate / B))
+    Tx_EbN0 = 10 * np.log10(B / (k * noise_power))
+    
     print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
     
@@ -530,18 +539,22 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         pad_length = int(N_t * np.ceil((len(x_sym) + effective_crc_length_symbols) / N_t)) - len(x_sym) - effective_crc_length_symbols # in symbols
         x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
 
+        # For every vector x, the power should be 1/N_t.
+        # x_sym_crc = np.array([[1],[1]]) for N_r and N_t = 2 for debugging.
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
+        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2, axis=0) * np.sqrt(N_t)
         
         # TODO: Introduce a precoder
         
         # Additive noise
-        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot)) + \
-            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot))
+        noise_dimension = max(n_pilot, x_sym_crc.shape[1])
+        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, noise_dimension)) + \
+            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, noise_dimension))
         
         # Debug purposes
         if perfect_csi:
-            n = np.zeros((N_r, n_pilot))
-            H = np.sqrt(G) * np.eye(N_t)
+            n = np.zeros((N_r, noise_dimension))
+            H = np.eye(N_t)
 
         # TODO: Introduce quantization for both Y and Y pilot
         
@@ -553,7 +566,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         P = generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
         
         # Channel
-        T = np.sqrt(G) * H@P + n
+        T = np.sqrt(G) * H@P + n[:, :n_pilot]
     
         # Estimate the channel
         H_hat = estimate_channel(P, T, noise_power, random_state=np_random)
@@ -566,8 +579,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # Channel equalization
         W = equalize_channel(H_hat)
         
-        # The optimal equalizer should fulfill W* H = I_{N_t}]
-        x_sym_crc_hat = W.conjugate().transpose() @ Y
+        # The optimal equalizer should fulfill WH = I_{N_t}]
+        x_sym_crc_hat = W@Y
         
         # crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
         x_sym_hat = _vec(x_sym_crc_hat)[:-effective_crc_length_symbols] # payload including padding
@@ -585,11 +598,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # X = np.c_[np.real(x_sym_hat), np.imag(x_sym_hat)]
         # y = x_info_hat
         # model_dnn, dnn_accuracy_score, _ = DNN_detect_symbol(X=X, y=y)
-        
+
         # Compute the EbN0 at the receiver
         received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
-        N0 = received_noise_power / B
-        Rx_EbN0.append(10 * np.log10((Es/k) / N0))
+        Rx_EbN0 = 10 * np.log10(B / (k * received_noise_power))
         
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
@@ -627,24 +639,25 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_
 
 
-def read_bitmap(file):
+def read_bitmap(file, word_length=8):
     # This is a 32x32 pixel image
     im_orig = plt.imread(file)
     
-    im = im_orig.reshape(1, -1)[0]
-    im = [bin(a)[2:].zfill(8) for a in im]
-    im = ''.join(im) # This is now a string of bits
+    im = im_orig.flatten()
+    im = [bin(a)[2:].zfill(word_length) for a in im] # all fields when converted to binary need to have word length.
     
+    im = ''.join(im) # This is now a string of bits
+        
     return im
 
 
-def _convert_to_bytes_decimal(data):
-    n = len(data) // 8
+def _convert_to_bytes_decimal(data, word_length=8):
+    n = len(data) // word_length
     dim = int(np.sqrt(n / 3))
     
     data_vector = []
     for i in range(n):
-        d = str(data[i*8:(i+1)*8])
+        d = str(data[i*word_length:(i+1)*word_length])
         d = int(d, 2)
         # print(d)
         data_vector.append(d)
@@ -661,7 +674,7 @@ def _convert_to_bytes_decimal(data):
 
 def _plot_bitmaps(data1, data2):
     fig, [ax1, ax2] = plt.subplots(nrows=1, ncols=2)
-    
+        
     ax1.imshow(_convert_to_bytes_decimal(data1))
     ax2.imshow(_convert_to_bytes_decimal(data2))
     
@@ -698,7 +711,7 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
     data = read_bitmap(file_name)
 
-    _plot_bitmaps(data, data)
+    # _plot_bitmaps(data, data)
     
     df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
     for sigma in sigmas:
