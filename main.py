@@ -18,6 +18,7 @@ import pdb
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
+# For Windows users
 if os.name == 'nt':
     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
 
@@ -53,8 +54,8 @@ sigmas = np.sqrt(np.logspace(-2, 4, num=6)) # square root of noise power
 prefer_gpu = True
 ##################
 
-__release_date__ = '2023-12-27'
-__ver__ = '0.41'
+__release_date__ = '2023-12-28'
+__ver__ = '0.2'
 
 ##################
 plt.rcParams['font.family'] = "Arial"
@@ -407,17 +408,7 @@ def ML_detect_symbol(x_sym_hat, alphabet):
     bits_q = bits_q.reshape(x_sym_hat.shape)
     
     return information, symbols, [bits_i, bits_q], bits
-
-
-def quantize(Y, b):
-    if b == np.inf:
-        return Y
-    else:
-        # TODO:  Introduce quantization for any other b.
-        print("WARNING:  No quantization is performed.")
-        
-    return Y
-
+    
 
 def equalize_channel(H):
     global N_t, N_r, G
@@ -541,7 +532,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
         
-        # TODO: Introduce precoder
+        # TODO: Introduce a precoder
         
         # Additive noise
         n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, n_pilot)) + \
@@ -551,12 +542,11 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         if perfect_csi:
             n = np.zeros((N_r, n_pilot))
             H = np.sqrt(G) * np.eye(N_t)
-            
+
+        # TODO: Introduce quantization for both Y and Y pilot
+        
         # Channel
         Y = np.sqrt(G) * H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
-        
-        # Quantize Y
-        Y = quantize(Y, b=np.inf)
         
         # Pilot contribution (known sequence)
         # Generate pilot
@@ -573,7 +563,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
-        # Channel equalization using ZF
+        # Channel equalization
         W = equalize_channel(H_hat)
         
         # The optimal equalizer should fulfill W* H = I_{N_t}]
