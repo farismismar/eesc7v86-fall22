@@ -8,11 +8,11 @@ Channel estimation is performed through the use of least squares and linear mini
 
 Channel equalization is performed through the choices of zero forcing and minimum mean squared error (MMSE) equalizers.
 
-Symbol detection is performed through four different algorithms: 1) maximum likelihood 2) unsupervised learning and 3) fully connected deep neural networks.
+Symbol detection is performed through three different algorithms: 1) maximum likelihood 2) unsupervised learning and 3) fully connected deep neural networks.
 
 Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), Eb/N0 (both TX and RX), symbol error rate per stream, bit error rate per stream, and block error rate.
 
-The additional file `PlottingUtils.py` is a class used to plot probability density functions and cumulative distribution functions for various configurations (joint, marginal, multiplot).
+The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
 ## Citation
 
@@ -21,10 +21,11 @@ If you use this codes (or any code segments thereof) in a scientific publication
 `@misc{mlwirelesscomm,
 title={A Quick Primer on Machine Learning in Wireless Communications},
 author={Mismar, F. B.},
-year={2023},
+month=jan,
+year={2024},
 eprint={220x.yyyy},
 archivePrefix={arXiv},
-primaryClass={cs.IT}
+primaryClass={cs.NI}
 }`
 
 
@@ -33,7 +34,4 @@ primaryClass={cs.IT}
 | Version        | Date           | Description  |
 | ------------- |:-------------:| :-----|
 | 0.1      | 2022-01-02 | First release |
-| 0.2      | 2022-02-24 | Further features |
-| 0.3      | 2022-03-07 | Further improvements and bug fixes |
-| 0.4      | 2023-12-26 | Miscellaneous bug fixes and public release |
-| 0.41     | 2023-12-27 | Minor fixes |
+| 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28 |
