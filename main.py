@@ -49,7 +49,7 @@ f_c = 1.8e6 # in Hz
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = [0] # np.sqrt(np.logspace(-6, -2, num=6)) # square root of noise power 10 log(kTB + Nf)
+sigmas = np.sqrt(np.logspace(-6, -2, num=6)) # square root of noise power 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
