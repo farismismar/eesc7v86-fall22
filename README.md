@@ -18,16 +18,17 @@ The additional file `PlottingUtils.py` is a class used to plot probability densi
 
 If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the following preprint to keep track of the impact.
 
-`@misc{mlwirelesscomm,
-title={A Quick Primer on Machine Learning in Wireless Communications},
-author={Mismar, F. B.},
-month=jan,
-year={2024},
-eprint={220x.yyyy},
-archivePrefix={arXiv},
-primaryClass={cs.NI}
-}`
-
+`
+@misc{mismar2023quick,
+      title={A Quick Primer on Machine Learning in Wireless Communications}, 
+      author={Faris B. Mismar},
+      year={2023},
+      month=dec,
+      eprint={2312.17713},
+      archivePrefix={arXiv},
+      primaryClass={cs.NI}
+}
+`
 
 ## Versioning
 
