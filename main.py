@@ -13,8 +13,6 @@ from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-import pdb
-
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -40,16 +38,16 @@ constellation = 'QAM'
 M_constellation = 16
 seed = 7
 codeword_size = 16 # bits
-n_pilot = 6
-N_r = 4
-N_t = 4
+n_pilot = 20
+N_r = 16
+N_t = 16
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
 crc_polynomial = 0b0001_0010_0000_0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt(np.logspace(-6, -2, num=6)) # square root of noise power 10 log(kTB + Nf)
+sigmas = np.sqrt([1e-4, 3e-4, 7e-4, 1e-3, 3e-3, 7e-3]) # np.sqrt(np.logspace(-6, -2, num=6)) # square root of noise power 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
@@ -96,9 +94,12 @@ def _create_constellation_psk(M):
     centroids['I'] = gray.str[:(k//2)]
     centroids['Q'] = gray.str[(k//2):]
 
-    # Normalize the transmitted symbols    
     centroids.loc[:, 'x'] = centroids.loc[:, 'x_I'] + 1j * centroids.loc[:, 'x_Q']
-    centroids.loc[:, 'x'] = centroids['x'].apply(lambda x: x/abs(x))
+    
+    # Normalize the transmitted symbols    
+    # The average power is normalized to unity
+    P_average = np.mean(np.abs(centroids.loc[:, 'x']) ** 2)
+    centroids.loc[:, 'x'] /= np.sqrt(P_average)
     
     return centroids
 
@@ -139,10 +140,13 @@ def _create_constellation_qam(M):
     gray = constellation['m'].apply(lambda x: decimal_to_gray(x, k))
     constellation['I'] = gray.str[:(k//2)]
     constellation['Q'] = gray.str[(k//2):]
-        
-    # Normalize the transmitted symbols    
+    
     constellation.loc[:, 'x'] = constellation.loc[:, 'x_I'] + 1j * constellation.loc[:, 'x_Q']
-    constellation.loc[:, 'x'] = constellation['x'].apply(lambda x: x/abs(x))
+    
+    # Normalize the transmitted symbols    
+    # The average power is normalized to unity
+    P_average = np.mean(np.abs(constellation.loc[:, 'x']) ** 2)
+    constellation.loc[:, 'x'] /= np.sqrt(P_average)
     
     return constellation
 
@@ -369,15 +373,17 @@ def _unsupervised_detection(x_sym_hat, alphabet):
     return information, symbols, [bits_i, bits_q], bits
 
 
-def ML_detect_symbol(x_sym_hat, alphabet):
+def ML_detect_symbol(symbols, alphabet):
     df_information = pd.DataFrame()
-    x_sym_hat_flat = x_sym_hat.flatten()
+    symbols_flat = symbols.flatten()
     
-    for s in range(x_sym_hat_flat.shape[0]):
-        x_hat = x_sym_hat_flat[s]
+    for s in range(symbols_flat.shape[0]):
+        x_hat = symbols_flat[s]
         # This function returns argmin |x - s_m| based on AWGN ML detection
         # for any arbitrary constellation denoted by the alphabet
-        distances = alphabet['x'].apply(lambda x: abs(x - x_hat) ** 2)
+        distances = alphabet['x'].apply(lambda x: np.abs(x - x_hat) ** 2)
+        
+        # Simple distances.idxmin is not cutting it.
         m_star = distances.idxmin(axis=0)
         
         df_i = pd.DataFrame(data={'m': m_star,
@@ -387,20 +393,20 @@ def ML_detect_symbol(x_sym_hat, alphabet):
         
         df_information = pd.concat([df_information, df_i], axis=0, ignore_index=True)
     
-    information = df_information['m'].values.reshape(x_sym_hat.shape)
+    information = df_information['m'].values.reshape(symbols.shape)
     
     # Now simply compute other elements.
-    symbols = df_information['x'].values.reshape(x_sym_hat.shape)
+    symbols = df_information['x'].values.reshape(symbols.shape)
     bits_i = df_information['I'].values
     bits_q = df_information['Q'].values
     
     bits = []
-    for s in range(x_sym_hat_flat.shape[0]):
+    for s in range(symbols_flat.shape[0]):
         bits.append(f'{bits_i[s]}{bits_q[s]}')
         
-    bits = np.array(bits).reshape(x_sym_hat.shape)
-    bits_i = bits_i.reshape(x_sym_hat.shape)
-    bits_q = bits_q.reshape(x_sym_hat.shape)
+    bits = np.array(bits).reshape(symbols.shape)
+    bits_i = bits_i.reshape(symbols.shape)
+    bits_q = bits_q.reshape(symbols.shape)
     
     return information, symbols, [bits_i, bits_q], bits
     
@@ -464,6 +470,7 @@ def generate_pilot(N_r, N_t, n_pilot, random_state=None):
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
     global G
+    global compress_channel
     
     SERs = []
     BERs = []
@@ -496,27 +503,20 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Thus if bandwidth became B N_s due to spatial multiplexing, then the bit rate also scales by N_s.
     assert(k >= bit_rate_per_stream / B)
     
-    # Normalize symbol power (energy)
-    Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
-    assert(np.isclose(Es, 1.))
-    
-    Tx_SNR = 10*np.log10(Es / noise_power)
-    
-    # Note that N0 = noise_power / B
-    # Tx_EbN0 = 10 * np.log10(B / (noise_power * bit_rate / B))
-    Tx_EbN0 = -10 * np.log10(k * noise_power)
-    
-    print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
-    print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
-    
     b = len(data)
     n_transmissions = int(np.ceil(b / (codeword_size * N_t)))
     
     x_info_complete = bits_to_symbols(data, alphabet, k)
     
-    data_rx = []    
-    print(f'Transmitting a total of {b} bits.')
+    SNR_Rx = []
+    SNR_Tx = []
+    data_rx = []
+    Tx_EbN0 = []    
     Rx_EbN0 = []
+    Es_Tx = []
+    Es_Rx = []
+    
+    print(f'Transmitting a total of {b} bits.')
     for codeword in np.arange(n_transmissions):
         print(f'Transmitting codeword {codeword + 1}/{n_transmissions}')
         # Every transmission is for one codeword, divided up to N_t streams.
@@ -534,16 +534,29 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
                 
         # Symbols
         x_b_i, x_b_q, x_sym = bits_to_baseband(x_bits_orig, alphabet, k)
-
+        
         # Map codewords to the MIMO layers.
         pad_length = int(N_t * np.ceil((len(x_sym) + effective_crc_length_symbols) / N_t)) - len(x_sym) - effective_crc_length_symbols # in symbols
         x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
-
-        # For every vector x, the power should be Es
-        # x_sym_crc = np.array([[1],[1]]) for N_r and N_t = 2 for debugging.
-        x_sym_crc = x_sym_crc.reshape(-1, N_t).T
-        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2, axis=0)
         
+        # Symbol power (energy)
+        x_sym_crc = x_sym_crc.reshape(-1, N_t).T
+        Es = np.linalg.norm(x_sym_crc, ord=2, axis=0).mean()
+        Es_Tx.append(Es)
+
+        # For every vector x, the power should be Es N_t = N_t.
+        # np.linalg.norm(x_sym_crc, ord=2, axis=0) 
+        
+        Tx_SNR_ = 10*np.log10(Es / noise_power)
+        SNR_Tx.append(Tx_SNR_)
+        
+        # Note that N0 = noise_power / B
+        Tx_EbN0_ = 10 * np.log10(Es / (k * noise_power))
+        Tx_EbN0.append(Tx_EbN0_)
+        
+        print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR_:.4f} dB')
+        print(f'EbN0 at the transmitter (per stream): {Tx_EbN0_:.4f} dB')
+                
         # TODO: Introduce a precoder
         
         # Additive noise
@@ -576,54 +589,76 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
-        # Channel equalization
+        # Channel equalization using ZF
         W = equalize_channel(H_hat)
         
-        # The optimal equalizer should fulfill WH = I_{N_t}]
+        # The optimal equalizer should fulfill WH = I_{N_t} * sqrt(G)]
         x_sym_crc_hat = W@Y
+        # np.allclose(x_sym_crc_hat, x_sym_crc)
         
         # crc_sym_hat = _vec(x_sym_crc_hat)[-effective_crc_length_symbols:] # only transmitted CRC
         x_sym_hat = _vec(x_sym_crc_hat)[:-effective_crc_length_symbols] # payload including padding
-        
+
         # Remove the padding, which is essentially defined by the last data not on N_t boundary
         if pad_length > 0:
             x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
-        
-        # Detection of symbols (symbol star is the centroid of the constellation)
+
+        # np.allclose(x_sym_hat, x_sym)
+            
+        # Detection of symbols (symbol star is the centroid of the constellation)        
         x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
         # x_info_hat, _, _, x_bits_hat = _unsupervised_detection(x_sym_hat, alphabet)
         x_bits_hat = ''.join(x_bits_hat)
-        
+
         # # To test the performance of DNN in detecting symbols:
         # X = np.c_[np.real(x_sym_hat), np.imag(x_sym_hat)]
         # y = x_info_hat
         # model_dnn, dnn_accuracy_score, _ = DNN_detect_symbol(X=X, y=y)
-
+        
+        # Compute the received symbol power
+        x_sym_hat = x_sym_hat.reshape(-1, N_t).T
+        Es_Rx_ = np.linalg.norm(x_sym_hat, ord=2, axis=0).mean()
+        Es_Rx.append(Es_Rx_)
+        
+        # Note Es_Rx and Es_Tx should be very close due to conservation 
+        # of energy.
+        
         # Compute the EbN0 at the receiver
         received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
-        Rx_EbN0 = 10 * np.log10(G * B / (received_noise_power * bit_rate_per_stream)) # np.log10(G / (k * received_noise_power))
-                
+        # Why is the equalization noise too high?
+        # Rx_EbN0_ = 10 * np.log10(G * Es_Rx_ * B / (received_noise_power * bit_rate_per_stream))
+        Rx_EbN0_ = 10 * np.log10(G * Es_Rx_ / (k * noise_power))
+        print(f'EbN0 at the receiver: {Rx_EbN0_:.4f} dB')
+            
+        # Compute the received symbol SNR
+        Rx_SNR_ = 10*np.log10(G * Es_Rx_ / received_noise_power)
+        SNR_Rx.append(Rx_SNR_)
+        
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
-        
+
+        ########################################################
+        # Error statistics
+            
+        # Block error
         if int(crc) != int(crc_comp):
             block_error += 1
             
-        ########################################################
-        # Error statistics
         symbol_error = 1 - np.mean(x_info_hat == x_info)
         SERs.append(symbol_error)
         
-        x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
-        x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_hat_b, alphabet, k)
+        Rx_EbN0.append(Rx_EbN0_)
+        
+        #x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
+        x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_bits_hat, alphabet, k)
 
         ber_i = 1 - np.mean(x_hat_b_i == x_b_i)
         ber_q = 1 - np.mean(x_hat_b_q == x_b_q)
         
         # System should preserve the number of bits.
-        assert(len(x_bits_orig) == len(x_hat_b))
+        assert(len(x_bits_orig) == len(x_bits_hat))
         
-        data_rx.append(x_hat_b)
+        data_rx.append(x_bits_hat)
         ber = np.mean([ber_i, ber_q])
         BERs.append(ber)
         # for
@@ -635,8 +670,17 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
     # Now extract from every transmission 
     data_rx_ = ''.join(data_rx)
+    Es_Tx = np.mean(Es_Tx)
+    Es_Rx = np.mean(Es_Rx)
+    SER = np.mean(SERs)
+    BER = np.mean(BERs)
     
-    return SERs, BERs, BLER, Tx_EbN0, Rx_EbN0, data_rx_
+    SNR_Tx = np.mean(SNR_Tx)
+    SNR_Rx = np.mean(SNR_Rx)
+    Tx_EbN0 = np.mean(Tx_EbN0)
+    Rx_EbN0 = np.mean(Rx_EbN0)
+    
+    return Es_Tx, Es_Rx, SER, SNR_Tx, SNR_Rx, BER, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
 
 
 def read_bitmap(file, word_length=8):
@@ -712,17 +756,23 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     data = read_bitmap(file_name)
 
     # _plot_bitmaps(data, data)
-    
-    df_output = pd.DataFrame(columns=['noise_power', 'Rx_EbN0', 'Avg_SER', 'Avg_BER', 'BLER'])
+    df_output = pd.DataFrame(columns=['Es_Tx', 'Es_Rx', 'Avg_SER', 'Tx_SNR', 'Rx_SNR', 'Avg_BER', 'BLER', 'Tx_EbN0', 'Rx_EbN0', 'Bit_Rate', 'BW', 'noise_power'])
     for sigma in sigmas:
-        SER_i, BER_i, BLER_i, _, Rx_EbN0_i, data_received = \
+        Es_Tx_i, Es_Rx_i, SER_i, Tx_SNR_i, Rx_SNR_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
             transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
                          sigma ** 2, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
-        df_output_ = pd.DataFrame(data={'Avg_SER': SER_i})
-        df_output_['Avg_BER'] = BER_i
-        df_output_['noise_power'] = sigma ** 2
-        df_output_['BLER'] = BLER_i
-        df_output_['Rx_EbN0'] = Rx_EbN0_i
+        df_output_ = pd.DataFrame(data={'Es_Tx': Es_Tx_i,
+                                        'Es_Rx': Es_Rx_i,
+                                        'Avg_SER': SER_i,
+                                        'Tx_SNR': Tx_SNR_i,
+                                        'Rx_SNR': Rx_SNR_i,
+                                        'Avg_BER': BER_i,
+                                        'BLER': BLER_i,
+                                        'Tx_EbN0': Tx_EbN0_i,
+                                        'Rx_EbN0': Rx_EbN0_i,
+                                        'Bit_Rate': bit_rate,
+                                        'BW': bandwidth,
+                                        'noise_power': sigma ** 2}, index=[0])
         
         _plot_bitmaps(data, data_received)
         
@@ -735,6 +785,8 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
         print('Average symbol error rate: {:.4f}.'.format(np.mean(SER_i)))
         print('Average bit error rate: {:.4f}.'.format(np.mean(BER_i)))
 
+    df_output = df_output.reset_index(drop=True)
+    
     return df_output
 
 
