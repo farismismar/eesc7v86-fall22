@@ -500,11 +500,11 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     Es = np.linalg.norm(alphabet['x'], ord=2) ** 2 / alphabet.shape[0]
     assert(np.isclose(Es, 1.))
     
-    Tx_SNR = 10*np.log10(G * Es / (N_t * noise_power))
+    Tx_SNR = 10*np.log10(Es / noise_power)
     
     # Note that N0 = noise_power / B
     # Tx_EbN0 = 10 * np.log10(B / (noise_power * bit_rate / B))
-    Tx_EbN0 = 10 * np.log10(B / (k * noise_power))
+    Tx_EbN0 = -10 * np.log10(k * noise_power)
     
     print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR:.4f} dB')
     print(f'EbN0 at the transmitter (per stream): {Tx_EbN0:.4f} dB')
@@ -539,10 +539,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         pad_length = int(N_t * np.ceil((len(x_sym) + effective_crc_length_symbols) / N_t)) - len(x_sym) - effective_crc_length_symbols # in symbols
         x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
 
-        # For every vector x, the power should be 1/N_t.
+        # For every vector x, the power should be Es
         # x_sym_crc = np.array([[1],[1]]) for N_r and N_t = 2 for debugging.
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T
-        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2, axis=0) * np.sqrt(N_t)
+        x_sym_crc /= np.linalg.norm(x_sym_crc, ord=2, axis=0)
         
         # TODO: Introduce a precoder
         
@@ -601,8 +601,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
         # Compute the EbN0 at the receiver
         received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
-        Rx_EbN0 = 10 * np.log10(B / (k * received_noise_power))
-        
+        Rx_EbN0 = 10 * np.log10(G * B / (received_noise_power * bit_rate_per_stream)) # np.log10(G / (k * received_noise_power))
+                
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
         
