@@ -37,7 +37,7 @@ from sklearn.preprocessing import MinMaxScaler
 # System parameters
 file_name = 'faris.bmp' # Payload to be transmitted
 constellation = 'QAM'
-M_constellation = 16
+M_constellation = 64
 seed = 7
 codeword_size = 16 # bits
 n_pilot = 20
@@ -634,7 +634,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
         ########################################################
         # Error statistics
-            
         # Block error
         if int(crc) != int(crc_comp):
             block_error += 1
@@ -657,7 +656,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         ber = np.mean([ber_i, ber_q])
         BERs.append(ber)
         # for
-
+    
     total_transmitted_bits = N_t * codeword_size * n_transmissions
     print(f"Total transmitted bits: {total_transmitted_bits} bits.")
 
