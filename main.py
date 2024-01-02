@@ -617,26 +617,16 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # X = np.c_[np.real(x_sym_hat), np.imag(x_sym_hat)]
         # y = x_info_hat
         # model_dnn, dnn_accuracy_score, _ = DNN_detect_symbol(X=X, y=y)
-        
-        # Compute the received symbol power
-        Es_Rx_ = np.linalg.norm(x_sym_crc_hat, ord=2, axis=0).mean()
-        Es_Rx_ *= G / noise_power # something has caused this  normalization step, but this is now 1 Joule.
-        
-        Es_Rx.append(10*np.log10(Es_Rx_) + 30) # in dBm
-        
-        # Note Es_Rx and Es_Tx should be very close due to conservation 
-        # of energy.
-        
+                
         # Compute the EbN0 at the receiver
-        received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
-        # Why is the equalization noise too high?
+        received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise        
         # N0_rx = received_noise_power / B
-        # Rx_EbN0_ = 10 * np.log10(G * Es_Rx_ * B / (N0_rx * bit_rate_per_stream))
-        Rx_EbN0_ = 10 * np.log10(G * Es_Rx_ * B / (k * noise_power))
+        # Rx_EbN0_ = 10 * np.log10(Es / (k * noise_power)) 
+        Rx_EbN0_ = 10 * np.log10(Es * B / (received_noise_power * bit_rate_per_stream)) 
         print(f'EbN0 at the receiver: {Rx_EbN0_:.4f} dB')
             
         # Compute the received symbol SNR
-        Rx_SNR_ = 10*np.log10(G * Es_Rx_ * B / noise_power)
+        Rx_SNR_ = 10*np.log10(G * Es * B / received_noise_power)
         SNR_Rx.append(Rx_SNR_)
         
         # Compute CRC on the received frame
@@ -678,7 +668,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     
     # Summarized
     # Es_Tx = np.mean(Es_Tx)
-    # Es_Rx = np.mean(Es_Rx)
     # SER = np.mean(SERs)
     # BER = np.mean(BERs)
     
@@ -687,7 +676,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Tx_EbN0 = np.mean(Tx_EbN0)
     # Rx_EbN0 = np.mean(Rx_EbN0)
     
-    return np.arange(n_transmissions), Es_Tx, Es_Rx, SERs, SNR_Tx, SNR_Rx, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
+    return np.arange(n_transmissions), Es, SERs, SNR_Tx, SNR_Rx, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
 
 
 def read_bitmap(file, word_length=8):
@@ -763,14 +752,13 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     data = read_bitmap(file_name)
 
     # _plot_bitmaps(data, data)
-    df_output = pd.DataFrame() #columns=['Es_Tx', 'Es_Rx', 'SER', 'Tx_SNR', 'Rx_SNR', 'Avg_BER', 'BLER', 'Tx_EbN0', 'Rx_EbN0', 'Bit_Rate', 'BW', 'noise_power'])
+    df_output = pd.DataFrame()
     for sigma in sigmas:
-        c_i, Es_Tx_i, Es_Rx_i, SER_i, Tx_SNR_i, Rx_SNR_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
+        c_i, Es_Tx_i, SER_i, Tx_SNR_i, Rx_SNR_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
             transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
                          sigma ** 2, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
         df_output_ = pd.DataFrame(data={'Codeword': c_i})
-        df_output_['Es_Tx'] = Es_Tx_i
-        df_output_['Es_Rx'] = Es_Rx_i
+        df_output_['Es'] = Es_Tx_i        
         df_output_['SER'] = SER_i
         df_output_['Tx_SNR'] = Tx_SNR_i
         df_output_['Rx_SNR'] = Rx_SNR_i
