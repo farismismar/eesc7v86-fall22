@@ -54,7 +54,7 @@ sigmas = sigmas = np.sqrt(np.logspace(-3, -1, num=6)) # square root of noise pow
 prefer_gpu = True
 ##################
 
-__release_date__ = '2024-12-28'
+__release_date__ = '2023-12-28'
 __ver__ = '0.2'
 
 ##################
@@ -520,7 +520,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     Rx_EbN0 = []
     Es_Tx = []
     Es_Rx = []
-    PL = []
 
     print(f'Transmitting a total of {b} bits.')
     for codeword in np.arange(n_transmissions):
@@ -630,9 +629,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         Rx_SNR_ = 10*np.log10(G * Es * B / received_noise_power)
         SNR_Rx.append(Rx_SNR_)
 
-        # Compute the path loss
-        PL.append(10*np.log10(G))
-        
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
 
@@ -679,7 +675,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Tx_EbN0 = np.mean(Tx_EbN0)
     # Rx_EbN0 = np.mean(Rx_EbN0)
     
-    return np.arange(n_transmissions), Es, SERs, SNR_Tx, SNR_Rx, PL, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
+    return np.arange(n_transmissions), Es, SERs, SNR_Tx, SNR_Rx, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
 
 
 def read_bitmap(file, word_length=8):
@@ -757,15 +753,14 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     # _plot_bitmaps(data, data)
     df_output = pd.DataFrame()
     for sigma in sigmas:
-        c_i, Es_Tx_i, SER_i, Tx_SNR_i, Rx_SNR_i, PL_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
+        c_i, Es_Tx_i, SER_i, Tx_SNR_i, Rx_SNR_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
             transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
                          sigma ** 2, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
         df_output_ = pd.DataFrame(data={'Codeword': c_i})
         df_output_['Es'] = Es_Tx_i        
         df_output_['SER'] = SER_i
         df_output_['Tx_SNR'] = Tx_SNR_i
-        df_output_['Rx_SNR'] = Rx_SNR_i
-        df_output_['PL'] = PL_i
+        df_output_['Rx_SNR'] = Rx_SNR_i        
         df_output_['Avg_BER'] = BER_i
         df_output_['BLER'] = BLER_i
         df_output_['Tx_EbN0'] = Tx_EbN0_i
