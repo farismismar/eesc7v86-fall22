@@ -14,9 +14,11 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 
 The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
+The preprint updates will be uploaded here under the name `primer.pdf`
+
 ## Citation
 
-If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the this [preprint](https://arxiv.org/abs/2312.17713) to keep track of the impact.
+If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the this preprint to keep track of the impact.
 
 `@misc{mismar2023quick, title={A Quick Primer on Machine Learning in Wireless Communications}, author={Faris B. Mismar}, year={2023}, month=dec, eprint={2312.17713}, archivePrefix={arXiv}, primaryClass={cs.NI}}`
 
@@ -26,3 +28,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | ------------- |:-------------:| :-----|
 | 0.1      | 2022-01-02 | First release |
 | 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28 |
+| 0.3      | 2024-01-03 | Major revision and error fixes.
