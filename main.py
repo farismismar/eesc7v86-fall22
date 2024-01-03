@@ -686,8 +686,6 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         symbol_error = 1 - np.mean(x_info_hat == x_info)
         SERs.append(symbol_error)
         
-        Rx_EbN0.append(Rx_EbN0_)
-        
         #x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
         x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_bits_hat, alphabet, k)
 
