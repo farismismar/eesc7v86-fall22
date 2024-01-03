@@ -36,20 +36,20 @@ from sklearn.preprocessing import MinMaxScaler
 
 # System parameters
 file_name = 'faris.bmp' # Payload to be transmitted
-constellation = 'QAM'
-M_constellation = 16
+constellation = 'QPSK'
+M_constellation = 4
 seed = 7
-codeword_size = 4 # bits
-n_pilot = 6
-N_r = 4
-N_t = 4
+codeword_size = 8 # bits
+n_pilot = 2
+N_r = 1
+N_t = 1
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
-crc_polynomial = 0b0010
+crc_polynomial = 0b0101_01010
 crc_length = 2 # bits
 
-sigmas = np.sqrt([15,300,1500,3000,15000,30000]) # square root of noise power (W) 10 log(kTB + Nf)
+sigmas = np.sqrt([3,15,300,1500,3000,15000,30000]) # square root of noise power (W) 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
@@ -254,7 +254,11 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     
     # Make sure the crc polynomial is not longer than the codeword size.
     # Otherwise, an error
+    length_crc = len(bin(crc_polynomial)[2:])
     
+    if codeword_size < length_crc:
+        raise ValueError(f'The codeword size should be {length_crc} bits')
+        
     x_bits = x_bits_orig.zfill(codeword_size)
 
     crc = 0
@@ -532,6 +536,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     Es_Tx = []
     Es_Rx = []
     PL = []
+    
+    if n_transmissions < 1000:
+        print('Warning: Small number of transmissions can cause curves to look incorrect due to insufficient number of samples.')
 
     print(f'Transmitting a total of {b} bits.')
     for codeword in np.arange(n_transmissions):
@@ -573,6 +580,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'EbN0 at the transmitter (per stream): {Tx_EbN0_:.4f} dB')
                 
         # TODO: Introduce a precoder
+        F = np.eye(N_t)
         
         # Additive noise sampled from a complex Gaussian        
         noise_dimension = max(n_pilot, x_sym_crc.shape[1])
@@ -587,16 +595,16 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # TODO: Introduce quantization for both Y and Y pilot
         
         # Channel
-        Hx = H@x_sym_crc
-        Y = np.sqrt(G) * Hx + n[:, :x_sym_crc.shape[1]]
+        HFx = H@F@x_sym_crc
+        Y = np.sqrt(G) * HFx + n[:, :x_sym_crc.shape[1]]
         
         # Pilot contribution (known sequence)
         # Generate pilot
         P = generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
         
         # Channel
-        HP = H@P
-        T = np.sqrt(G) * HP + n[:, :n_pilot]
+        HFP = H@F@P
+        T = np.sqrt(G) * HFP + n[:, :n_pilot]
     
         # Estimate the channel
         H_hat = estimate_channel(P, T, noise_power, random_state=np_random)
@@ -608,6 +616,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         
         # Channel equalization using ZF
         W = equalize_channel(H_hat)
+        
+        # TODO: How does F impact W?
         
         # The optimal equalizer should fulfill WH = I_{N_t} * sqrt(G)]
         x_sym_crc_hat = W@Y
@@ -647,7 +657,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
         
         if Rx_EbN0_ < -1.59:
-            print(f'** Outage at the receiver **')
+            print('** Outage at the receiver **')
 
         # Compute the path loss which is the channel gain multiplied by the large scale fading gain.
         PL.append(-10*np.log10(G))
@@ -774,7 +784,7 @@ def compute_large_scale_fading(d, f_c, pl_exp=2):
     l = c / f_c
     G = (4 * pi * d / l) ** pl_exp
     
-    G = 1
+    # G = 1
 
     return G
         
