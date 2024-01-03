@@ -64,6 +64,7 @@ plt.rcParams['font.size'] = "14"
 np_random = np.random.RandomState(seed=seed)
 k_constellation = int(np.log2(M_constellation))
 
+
 def create_constellation(constellation, M):
     if (constellation == 'QPSK'):
         return _create_constellation_psk(M)
@@ -616,8 +617,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         
         # Channel equalization using ZF
         W = equalize_channel(H_hat)
+        W /= np.trace(W)
         
-        # TODO: How does F impact W?
+        # TODO: How does F impact W?  Idea removes N_t in the denom.
         
         # The optimal equalizer should fulfill WH = I_{N_t} * sqrt(G)]
         x_sym_crc_hat = W@Y
@@ -646,21 +648,31 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
         
         # TODO:  Check the receiver statistics.
+        # Compute the path loss which is the channel gain multiplied by the large scale fading gain.
+        PL.append(-10*np.log10(G))
+
         # Compute the received symbol SNR all before equalization
         Rx_SNR_ = 10*np.log10(G * Es * B / (N_t * noise_power))
-        SNR_Rx.append(Rx_SNR_)
-
+        
         # Compute the EbN0 at the receiver and just before equalization
         Rx_EbN0_ = 10 * np.log10(G * Es * B / (N_t * noise_power * bit_rate_per_stream))
         
-        print(f'Symbol SNR at the transmitter (per stream): {Rx_SNR_:.4f} dB')
+        print(f'Symbol SNR at the receiver (per stream): {Rx_SNR_:.4f} dB')
+        print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
+        
+        # Compute the received symbol SNR all after equalization
+        Rx_SNR_ = 10*np.log10(Es * B / (N_t * received_noise_power))
+        SNR_Rx.append(Rx_SNR_)
+
+        # Compute the EbN0 at the receiver and just before equalization
+        Rx_EbN0_ = 10 * np.log10(Es * B / (N_t * received_noise_power * bit_rate_per_stream))
+        Rx_EbN0.append(Rx_EbN0_)
+
+        print(f'Symbol SNR at the receiver (per stream): {Rx_SNR_:.4f} dB')
         print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
         
         if Rx_EbN0_ < -1.59:
             print('** Outage at the receiver **')
-
-        # Compute the path loss which is the channel gain multiplied by the large scale fading gain.
-        PL.append(-10*np.log10(G))
         
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
@@ -721,11 +733,11 @@ def read_bitmap(file, word_length=8):
     im = ''.join(im) # This is now a string of bits
 
     # These lines are for random bits 
-    # im  = np_random.binomial(1,0.5,10000)
-    # s = ''
-    # for a in im:
-    #     s = s + str(a)
-    # im = s
+    im  = np_random.binomial(1,0.5, 40000)
+    s = ''
+    for a in im:
+        s = s + str(a)
+    im = s
     
     return im
 
@@ -783,8 +795,6 @@ def generate_plot(df, xlabel, ylabel):
 def compute_large_scale_fading(d, f_c, pl_exp=2):
     l = c / f_c
     G = (4 * pi * d / l) ** pl_exp
-    
-    # G = 1
 
     return G
         
