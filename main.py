@@ -37,25 +37,25 @@ from sklearn.preprocessing import MinMaxScaler
 # System parameters
 file_name = 'faris.bmp' # Payload to be transmitted
 constellation = 'QAM'
-M_constellation = 64
+M_constellation = 16
 seed = 7
-codeword_size = 16 # bits
-n_pilot = 20
-N_r = 16
-N_t = 16
+codeword_size = 4 # bits
+n_pilot = 6
+N_r = 4
+N_t = 4
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
-crc_polynomial = 0b0001_0010_0000_0010
+crc_polynomial = 0b0010
 crc_length = 2 # bits
 
-sigmas = np.sqrt([0.0001, 0.0003, 0.0005, 0.0007, 0.0009, 0.001, 0.003]) # square root of noise power (W) 10 log(kTB + Nf)
+sigmas = np.sqrt([15,300,1500,3000,15000,30000]) # square root of noise power (W) 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
 
-__release_date__ = '2023-12-28'
-__ver__ = '0.2'
+__release_date__ = '2024-01-03'
+__ver__ = '0.3'
 
 ##################
 plt.rcParams['font.family'] = "Arial"
@@ -194,7 +194,7 @@ def bits_to_symbols(x_b, alphabet, k):
     for i in range(iter_ct):
         bits_i = x_b[i*k:(i+1)*k] # read the next ith stride of k bits
         # Convert this to symbol from alphabet
-        sym_i = df_.loc[df_['IQ'] == bits_i, 'm'].values[0].astype(int)
+        sym_i = df_.loc[df_['IQ'] == bits_i.zfill(k), 'm'].values[0].astype(int)
         # print(bits_i, sym_i)
         x_sym.append(sym_i)
         
@@ -250,10 +250,17 @@ def bits_to_baseband(x_bits, alphabet, k):
 
 def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     # Introduce CRC to x
+    global codeword_size
+    
+    # Make sure the crc polynomial is not longer than the codeword size.
+    # Otherwise, an error
+    
+    x_bits = x_bits_orig.zfill(codeword_size)
+
     crc = 0
     for position, value in enumerate(bin(crc_polynomial)[2:]):
         if value == '1':
-            crc = crc ^ int(x_bits_orig[position])
+            crc = crc ^ int(x_bits[position])
     crc = bin(crc)[2:]
     
     if len(crc) > crc_length:
@@ -268,8 +275,9 @@ def create_rayleigh_channel(N_r, N_t):
     # Rayleigh fading with G being the large scale fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
-    # Normalize the channel
-    H /= np.linalg.norm(H, ord='fro') / np.sqrt(N_t*N_r)
+    
+    # Normalize the channel so it has unity power gain
+    H /= np.linalg.norm(H, ord='fro')
     
     return H
 
@@ -474,6 +482,9 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     global G
     global compress_channel
     
+    if codeword_size < k:
+        raise ValueError("Codeword size is too small for the chosen modulation")
+        
     SERs = []
     BERs = []
     block_error = 0
@@ -520,6 +531,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     Rx_EbN0 = []
     Es_Tx = []
     Es_Rx = []
+    PL = []
 
     print(f'Transmitting a total of {b} bits.')
     for codeword in np.arange(n_transmissions):
@@ -551,10 +563,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # For every vector x, the power should be Es N_t = N_t.
         # np.linalg.norm(x_sym_crc, ord=2, axis=0) 
         
-        Tx_SNR_ = 10*np.log10(Es * B / noise_power)
+        Tx_SNR_ = 10*np.log10(Es * B / (N_t * noise_power))
         SNR_Tx.append(Tx_SNR_)
         
-        Tx_EbN0_ = 10 * np.log10(Es * B / (k * noise_power))
+        Tx_EbN0_ = 10 * np.log10(Es * B / (k * N_t * noise_power))
         Tx_EbN0.append(Tx_EbN0_)
         
         print(f'Symbol SNR at the transmitter (per stream): {Tx_SNR_:.4f} dB')
@@ -562,10 +574,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
                 
         # TODO: Introduce a precoder
         
-        # Additive noise
+        # Additive noise sampled from a complex Gaussian        
         noise_dimension = max(n_pilot, x_sym_crc.shape[1])
-        n = np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, noise_dimension)) + \
-            1j * np_random.normal(0, scale=noise_power/np.sqrt(2), size=(N_r, noise_dimension))
+        n = np_random.normal(0, scale=np.sqrt(noise_power)/np.sqrt(2), size=(N_r, noise_dimension)) + \
+            1j * np_random.normal(0, scale=np.sqrt(noise_power)/np.sqrt(2), size=(N_r, noise_dimension))
         
         # Debug purposes
         if perfect_csi:
@@ -575,14 +587,16 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # TODO: Introduce quantization for both Y and Y pilot
         
         # Channel
-        Y = np.sqrt(G) * H@x_sym_crc + n[:, :x_sym_crc.shape[1]]
+        Hx = H@x_sym_crc
+        Y = np.sqrt(G) * Hx + n[:, :x_sym_crc.shape[1]]
         
         # Pilot contribution (known sequence)
         # Generate pilot
         P = generate_pilot(N_r, N_t, n_pilot, random_state=np_random)
         
         # Channel
-        T = np.sqrt(G) * H@P + n[:, :n_pilot]
+        HP = H@P
+        T = np.sqrt(G) * HP + n[:, :n_pilot]
     
         # Estimate the channel
         H_hat = estimate_channel(P, T, noise_power, random_state=np_random)
@@ -617,18 +631,27 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # X = np.c_[np.real(x_sym_hat), np.imag(x_sym_hat)]
         # y = x_info_hat
         # model_dnn, dnn_accuracy_score, _ = DNN_detect_symbol(X=X, y=y)
-                
-        # Compute the EbN0 at the receiver
-        received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise        
-        # N0_rx = received_noise_power / B
-        # Rx_EbN0_ = 10 * np.log10(Es / (k * noise_power)) 
-        Rx_EbN0_ = 10 * np.log10(Es * B / (received_noise_power * bit_rate_per_stream)) 
-        print(f'EbN0 at the receiver: {Rx_EbN0_:.4f} dB')
-            
-        # Compute the received symbol SNR
-        Rx_SNR_ = 10*np.log10(G * Es * B / received_noise_power)
+        
+        # TODO:  This needs to be fixed:
+        received_noise_power = noise_power * np.linalg.norm(W, 'fro') ** 2 # equalization enhanced noise
+        
+        # TODO:  Check the receiver statistics.
+        # Compute the received symbol SNR all before equalization
+        Rx_SNR_ = 10*np.log10(G * Es * B / (N_t * noise_power))
         SNR_Rx.append(Rx_SNR_)
 
+        # Compute the EbN0 at the receiver and just before equalization
+        Rx_EbN0_ = 10 * np.log10(G * Es * B / (N_t * noise_power * bit_rate_per_stream))
+        
+        print(f'Symbol SNR at the transmitter (per stream): {Rx_SNR_:.4f} dB')
+        print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
+        
+        if Rx_EbN0_ < -1.59:
+            print(f'** Outage at the receiver **')
+
+        # Compute the path loss which is the channel gain multiplied by the large scale fading gain.
+        PL.append(-10*np.log10(G))
+        
         # Compute CRC on the received frame
         crc_comp = compute_crc(x_bits_hat, crc_polynomial, crc_length)
 
@@ -675,7 +698,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     # Tx_EbN0 = np.mean(Tx_EbN0)
     # Rx_EbN0 = np.mean(Rx_EbN0)
     
-    return np.arange(n_transmissions), Es, SERs, SNR_Tx, SNR_Rx, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
+    return np.arange(n_transmissions), Es, SERs, SNR_Tx, SNR_Rx, PL, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, B, data_rx_
 
 
 def read_bitmap(file, word_length=8):
@@ -684,9 +707,16 @@ def read_bitmap(file, word_length=8):
     
     im = im_orig.flatten()
     im = [bin(a)[2:].zfill(word_length) for a in im] # all fields when converted to binary need to have word length.
-    
+
     im = ''.join(im) # This is now a string of bits
-        
+
+    # These lines are for random bits 
+    # im  = np_random.binomial(1,0.5,10000)
+    # s = ''
+    # for a in im:
+    #     s = s + str(a)
+    # im = s
+    
     return im
 
 
@@ -743,6 +773,8 @@ def generate_plot(df, xlabel, ylabel):
 def compute_large_scale_fading(d, f_c, pl_exp=2):
     l = c / f_c
     G = (4 * pi * d / l) ** pl_exp
+    
+    G = 1
 
     return G
         
@@ -753,14 +785,15 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     # _plot_bitmaps(data, data)
     df_output = pd.DataFrame()
     for sigma in sigmas:
-        c_i, Es_Tx_i, SER_i, Tx_SNR_i, Rx_SNR_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
+        c_i, Es_Tx_i, SER_i, Tx_SNR_i, Rx_SNR_i, PL_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, bandwidth, data_received = \
             transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
                          sigma ** 2, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
         df_output_ = pd.DataFrame(data={'Codeword': c_i})
         df_output_['Es'] = Es_Tx_i        
         df_output_['SER'] = SER_i
         df_output_['Tx_SNR'] = Tx_SNR_i
-        df_output_['Rx_SNR'] = Rx_SNR_i        
+        df_output_['Rx_SNR'] = Rx_SNR_i
+        df_output_['PL'] = PL_i
         df_output_['Avg_BER'] = BER_i
         df_output_['BLER'] = BLER_i
         df_output_['Tx_EbN0'] = Tx_EbN0_i
@@ -792,7 +825,7 @@ df_output = run_simulation(file_name, codeword_size, H, constellation,
 df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
-xlabel = 'BLER'
-ylabel = 'Rx_EbN0'
+xlabel = 'Tx_EbN0'
+ylabel = 'Avg_BER'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
