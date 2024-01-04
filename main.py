@@ -615,7 +615,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Channel equalization using ZF
-        W = equalize_channel(H_reconstructed)
+        W = equalize_channel(H_hat)
         W /= np.trace(W)
         
         # TODO: How does F impact W?  Idea removes N_t in the denom.
