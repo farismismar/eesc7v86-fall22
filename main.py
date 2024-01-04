@@ -39,17 +39,17 @@ file_name = 'faris.bmp' # Payload to be transmitted
 constellation = 'QPSK'
 M_constellation = 4
 seed = 7
-codeword_size = 8 # bits
-n_pilot = 2
+codeword_size = 4 # bits
+n_pilot = 4
 N_r = 1
 N_t = 1
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
-crc_polynomial = 0b0101_01010
+crc_polynomial = 0b1010
 crc_length = 2 # bits
 
-sigmas = np.sqrt([3,15,300,1500,3000,15000,30000]) # square root of noise power (W) 10 log(kTB + Nf)
+sigmas = np.sqrt([0.001, 0.01, 0.1, 1, 10]) # square root of noise power (W) 10 log(kTB + Nf)
 
 prefer_gpu = True
 ##################
@@ -485,7 +485,6 @@ def generate_pilot(N_r, N_t, n_pilot, random_state=None):
 
 def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
     global G
-    global compress_channel
     
     if codeword_size < k:
         raise ValueError("Codeword size is too small for the chosen modulation")
@@ -532,13 +531,13 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
     SNR_Rx = []
     SNR_Tx = []
     data_rx = []
-    Tx_EbN0 = []    
+    Tx_EbN0 = []
     Rx_EbN0 = []
     Es_Tx = []
     Es_Rx = []
     PL = []
     
-    if n_transmissions < 1000:
+    if n_transmissions < 10000:
         print('Warning: Small number of transmissions can cause curves to look incorrect due to insufficient number of samples.')
 
     print(f'Transmitting a total of {b} bits.')
@@ -583,7 +582,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         # TODO: Introduce a precoder
         F = np.eye(N_t)
         
-        # Additive noise sampled from a complex Gaussian        
+        # Additive noise sampled from a complex Gaussian
         noise_dimension = max(n_pilot, x_sym_crc.shape[1])
         n = np_random.normal(0, scale=np.sqrt(noise_power)/np.sqrt(2), size=(N_r, noise_dimension)) + \
             1j * np_random.normal(0, scale=np.sqrt(noise_power)/np.sqrt(2), size=(N_r, noise_dimension))
@@ -616,7 +615,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
         # Channel equalization using ZF
-        W = equalize_channel(H_hat)
+        W = equalize_channel(H_reconstructed)
         W /= np.trace(W)
         
         # TODO: How does F impact W?  Idea removes N_t in the denom.
@@ -649,11 +648,11 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
         
         # TODO:  Check the receiver statistics.
         # Compute the path loss which is the channel gain multiplied by the large scale fading gain.
-        PL.append(-10*np.log10(G))
-
+        
         # Compute the received symbol SNR all before equalization
         Rx_SNR_ = 10*np.log10(G * Es * B / (N_t * noise_power))
         
+        PL.append(Rx_SNR_ - Tx_SNR_)
         # Compute the EbN0 at the receiver and just before equalization
         Rx_EbN0_ = 10 * np.log10(G * Es * B / (N_t * noise_power * bit_rate_per_stream))
         
@@ -666,8 +665,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, noise_power, crc_polyn
 
         # Compute the EbN0 at the receiver and just before equalization
         Rx_EbN0_ = 10 * np.log10(Es * B / (N_t * received_noise_power * bit_rate_per_stream))
-        Rx_EbN0.append(Rx_EbN0_)
-
+        Rx_EbN0.append(Rx_EbN0_)        
+        
         print(f'Symbol SNR at the receiver (per stream): {Rx_SNR_:.4f} dB')
         print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
         
