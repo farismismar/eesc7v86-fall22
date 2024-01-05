@@ -780,7 +780,7 @@ def generate_plot(df, xlabel, ylabel):
     df_plot = df_output.groupby('noise_power').mean().reset_index()
 
     fig, ax = plt.subplots(figsize=(9,6))
-    ax.set_xscale('log')
+    ax.set_yscale('log')
     plt.plot(df_plot[xlabel].values, df_plot[ylabel].values, '--bo', alpha=0.7, 
              markeredgecolor='k', markerfacecolor='r', markersize=6)
     plt.grid()
