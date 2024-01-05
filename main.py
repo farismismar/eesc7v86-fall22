@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+import tikzplotlib
 
 import pdb
 
@@ -176,7 +177,8 @@ def _plot_constellation(constellation):
     plt.grid(True)
     plt.xlabel('I')
     plt.ylabel('Q')
-    plt.show()
+#    plt.show()
+    tikzplotlib.save('constellation.tikz')
     plt.close(fig)
     
 
@@ -785,6 +787,7 @@ def generate_plot(df, xlabel, ylabel):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
+    tikzplotlib.save('output.tikz')
     plt.show()
     plt.close(fig)
     
@@ -797,6 +800,7 @@ def compute_large_scale_fading(d, f_c, pl_exp=2):
         
 def run_simulation(file_name, codeword_size, h, constellation, k_constellation, sigmas, crc_polynomial, crc_length, n_pilot):
     alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
+    _plot_constellation(constellation=alphabet)
     data = read_bitmap(file_name)
 
     # _plot_bitmaps(data, data)
