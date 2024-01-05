@@ -36,17 +36,17 @@ from sklearn.preprocessing import MinMaxScaler
 
 # System parameters
 file_name = 'faris.bmp' # Payload to be transmitted
-constellation = 'QPSK'
-M_constellation = 4
+constellation = 'QAM'
+M_constellation = 16 
 seed = 7
 codeword_size = 4 # bits
-n_pilot = 4
-N_r = 1
-N_t = 1
+n_pilot = 2
+N_r = 2
+N_t = 2
 f_c = 1.8e6 # in Hz
 
 # Note that the polynomial size is equal to the codeword size.
-crc_polynomial = 0b1010
+crc_polynomial = 0b1001
 crc_length = 2 # bits
 
 sigmas = np.sqrt([0.001, 0.01, 0.1, 1, 10]) # square root of noise power (W) 10 log(kTB + Nf)
@@ -730,7 +730,7 @@ def read_bitmap(file, word_length=8):
     im = ''.join(im) # This is now a string of bits
 
     # These lines are for random bits 
-    im  = np_random.binomial(1,0.5, 40000)
+    im  = np_random.binomial(1,0.5, 80000)
     s = ''
     for a in im:
         s = s + str(a)
@@ -770,7 +770,7 @@ def _plot_bitmaps(data1, data2):
     ax2.axis('off')
     
     plt.tight_layout()
-    plt.show()
+    # plt.show()
     plt.close(fig)
     
     
