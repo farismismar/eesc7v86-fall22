@@ -1,12 +1,12 @@
 # EESC 7v86 Selected Topics in Wireless Communications: Deep Learning for 5G
 
-This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel with Rayleigh fading and both QAM and QPSK symbols (Gray coded).  A MIMO receiver with zero forcing is also implemented.
+This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel with Rayleigh fading and both QAM and QPSK symbols (Gray coded).  A MIMO receiver with zero forcing (ZF) is also implemented.
 
 Several channel operations are performed: channel estimation, channel equalization, and symbol detection.
 
 Channel estimation is performed through the use of least squares and linear minimum mean squared error (L-MMSE) estimation formulas.
 
-Channel equalization is performed through the choices of zero forcing and minimum mean squared error (MMSE) equalizers.
+Channel equalization is performed through the choices of ZF and MMSE equalizers.
 
 Symbol detection is performed through three different algorithms: 1) maximum likelihood 2) unsupervised learning and 3) fully connected deep neural networks.
 
@@ -29,4 +29,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | 0.1      | 2022-01-02 | First release |
 | 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28 |
 | 0.3      | 2024-01-03 | Major revision and error fixes.
-| 0.4      | 2024-01-07 | Major revision and error fixes.
+| 0.4      | 2024-01-07 | Features: MIMO receivers, MMSE equalization, and channel eigenmodes.
