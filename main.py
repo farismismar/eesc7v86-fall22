@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+import tikzplotlib
 
 import pdb
 
@@ -36,7 +37,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 # System parameters
 file_name = None # either a file name or a payload
-payload_size = 20000 # bits
+payload_size = 30000 # bits
 constellation = 'QAM'
 M_constellation = 16
 seed = 7
@@ -49,7 +50,7 @@ f_c = 1.8e6 # in Hz
 crc_polynomial = 0b1001_0011
 crc_length = 4 # bits
 
-Tx_SNRs = [-3, 0, 3, 10, 20, 30, 40, 50] # in dB
+Tx_SNRs = [-3, 0, 3, 10, 20, 30, 35, 40, 50] # in dB
 
 prefer_gpu = True
 ##################
@@ -176,13 +177,22 @@ def _plot_constellation(constellation):
     plt.grid(True)
     plt.xlabel('I')
     plt.ylabel('Q')
-    plt.tight_layout()
 #    plt.show()
-    #tikzplotlib.save('constellation.tikz')
-    plt.savefig('constellation.pdf', format='pdf', dpi=fig.dpi)
-
+    tikzplotlib.save('constellation.tikz')
     plt.close(fig)
     
+
+def _ber(a, b):
+    assert(len(a) == len(b))
+    
+    length = len(a)
+    bit_error = 0
+    for idx in range(length):
+        if a[idx] != b[idx]:
+            bit_error += 1
+            
+    return bit_error / length
+
 
 def _vec(A):
     # A is numpy array
@@ -234,14 +244,14 @@ def symbols_to_bits(x_sym, k, alphabet, is_complex=False):
         return symbols_to_bits(information, k, alphabet, is_complex=False)
 
 
-def bits_to_baseband(x_bits, alphabet, k):
+def bits_to_baseband(x_bits, alphabet, k):    
     x_b_i = []
     x_b_q = []
     for idx in range(len(x_bits) // k):
-        codeword = x_bits[idx*k:(idx+1)*k]
+        codeword = x_bits[idx*k:(idx+1)*k]    
         x_b_i.append(codeword[:(k//2)])
         x_b_q.append(codeword[(k//2):])
-        
+
     x_sym = []
     # Next is baseband which is the complex valued symbols
     for i, q in zip(x_b_i, x_b_q):
@@ -280,16 +290,13 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
 
 
 def create_rayleigh_channel(N_r, N_t):
-    global G
-    
+    global G    
     # Rayleigh fading with G being the large scale fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
     
-    # Normalize s.t. |H| sq is G
-    H /= np.linalg.norm(H,'fro') / np.sqrt(G)
+    # TODO:  if fading then add to H the coefficients.
     
-    # TODO:  if fading then add to H the coefficients.    
     return H
 
 
@@ -495,6 +502,15 @@ def generate_pilot(N_r, N_t, n_pilot, random_state=None):
     return X_p
     
 
+def channel_eigenmodes(H):
+    # HH = H@H.conjugate().T
+    # eigenvalues, eigenvectors = np.linalg.eig(HH)
+    
+    U, S, Vh = np.linalg.svd(H, full_matrices=False)
+    eigenmodes = S ** 2
+    return eigenmodes
+
+    
 def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
     if codeword_size < k:
         raise ValueError("Codeword size is too small for the chosen modulation")
@@ -518,6 +534,10 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
     N_s = min(N_r, N_t)
     bit_rate_per_stream = bit_rate / N_s
 
+    eig = channel_eigenmodes(H)
+    n_eig = len(eig)
+    
+    print(f'Channel H has {n_eig} eigenmodes: {eig}.')
     print(f'Transmission maximum bitrate per stream = {bit_rate_per_stream:.2f} bps')
     
     # Find the correct number of subcarriers required for this bit rate
@@ -711,13 +731,14 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
             block_error += 1
         
         symbol_error = 1 - np.mean(x_info_hat == x_info)
-        SERs.append(symbol_error)
         
-        #x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
-        x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_bits_hat, alphabet, k)
+        SERs.append(symbol_error)
 
-        ber_i = 1 - np.mean(x_hat_b_i == x_b_i)
-        ber_q = 1 - np.mean(x_hat_b_q == x_b_q)
+        x_hat_b = symbols_to_bits(x_info_hat, k, alphabet, is_complex=False)
+        x_hat_b_i, x_hat_b_q, _ = bits_to_baseband(x_hat_b, alphabet, k)
+
+        ber_i = _ber(x_hat_b_i, x_b_i) 
+        ber_q = _ber(x_hat_b_q, x_b_q)
         
         # System should preserve the number of bits.
         assert(len(x_bits_orig) == len(x_bits_hat))
@@ -745,13 +766,10 @@ def MIMO_receive(Rx_SNR_dB, H_hat, algorithm):
     _, N_t = H_hat.shape
     
     if algorithm == 'ZF':
-        Rx_SNR_per_ant = (linear(Rx_SNR_dB) / N_t) / np.diag(np.real((np.linalg.inv(H_hat.conjugate().T@H_hat))))
-        
-    if algorithm == 'MMSE':
-        Rx_SNR_per_ant =  1 / np.diag(np.real(np.linalg.inv((linear(Rx_SNR_dB) / N_t) * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
+        return (linear(Rx_SNR_dB) / N_t) / np.diag(np.real((np.linalg.inv(H_hat.conjugate().T@H_hat))))
+    if algorithm == 'MMSE':    
+        return 1 / np.diag(np.real(np.linalg.inv((linear(Rx_SNR_dB) / N_t) * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
     
-    return [dB(x) for x in Rx_SNR_per_ant]
-
     
 def dB(x):
     return 10 * np.log10(x)
@@ -803,8 +821,8 @@ def _convert_to_bytes_decimal(data, word_length=8):
     
     return data_vector
 
-def _plot_bitmaps(data1, data2):
 
+def _plot_bitmaps(data1, data2):
     fig, [ax1, ax2] = plt.subplots(nrows=1, ncols=2)
         
     ax1.imshow(_convert_to_bytes_decimal(data1))
@@ -818,7 +836,7 @@ def _plot_bitmaps(data1, data2):
     plt.close(fig)
     
     
-def generate_plot(df, xlabel, ylabel):    
+def generate_plot(df, xlabel, ylabel):
     cols = list(set([xlabel, ylabel, 'Tx_SNR']))
     df = df[cols]
     df_plot = df.groupby('Tx_SNR').mean().reset_index()
@@ -831,7 +849,7 @@ def generate_plot(df, xlabel, ylabel):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
-    plt.savefig('output.pdf', format='pdf', dpi=fig.dpi)
+    tikzplotlib.save('output.tikz')
     plt.show()
     plt.close(fig)
     
@@ -892,6 +910,6 @@ df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
 xlabel = 'Tx_SNR'
-ylabel = 'SER'
+ylabel = 'Avg_BER'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
