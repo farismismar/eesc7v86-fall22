@@ -817,7 +817,8 @@ def _plot_bitmaps(data1, data2):
     
     
 def generate_plot(df, xlabel, ylabel):
-    df_plot = df_output.groupby('Tx_SNR').mean().reset_index()
+    df = df[[xlabel, ylabel, 'Tx_SNR']]
+    df_plot = df.groupby('Tx_SNR').mean().reset_index()
 
     fig, ax = plt.subplots(figsize=(9,6))
     ax.set_yscale('log')
