@@ -177,6 +177,7 @@ def _plot_constellation(constellation):
     plt.grid(True)
     plt.xlabel('I')
     plt.ylabel('Q')
+    plt.tight_layout()
 #    plt.show()
     tikzplotlib.save('constellation.tikz')
     plt.close(fig)
