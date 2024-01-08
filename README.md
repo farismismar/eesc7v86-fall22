@@ -1,6 +1,6 @@
 # EESC 7v86 Selected Topics in Wireless Communications: Deep Learning for 5G
 
-This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel with Rayleigh fading and both QAM and QPSK symbols (Gray coded).  A MIMO receiver with zero forcing (ZF) is also implemented.
+This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel with Rayleigh fading and both QAM and QPSK symbols (Gray coded).
 
 Several channel operations are performed: channel estimation, channel equalization, and symbol detection.
 
