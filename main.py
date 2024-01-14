@@ -40,7 +40,7 @@ file_name = 'faris.bmp' # either a file name or a payload
 payload_size = 0 # 30000 # bits
 constellation = 'QAM'
 M_constellation = 16
-MIMO_equalizer = 'ZF'
+MIMO_equalizer = 'MMSE'
 seed = 7
 codeword_size = 1024 # bits
 n_pilot = 4
@@ -520,8 +520,7 @@ def ML_detect_symbol(symbols, alphabet):
     return information, symbols, [bits_i, bits_q], bits
     
 
-def equalize_channel(H_hat, algorithm, rho=None):
-    # Somehow when N_t = 4, the MMSE misbehaves.
+def equalize_channel(H_hat, algorithm, Px=None, rho=None):
     # rho is linear (non dB).  So is Rx_SNR.
     
     N_r, N_t = H_hat.shape
@@ -531,7 +530,7 @@ def equalize_channel(H_hat, algorithm, rho=None):
         Rx_SNR = rho / np.diag(np.real(np.linalg.inv(H_hat.conjugate().T@H_hat)))
     if algorithm == 'MMSE':
         assert(rho is not None)
-        W = np.linalg.inv(H_hat@H_hat.conjugate().T + (1./rho)*np.eye(N_t))@H_hat.conjugate().T
+        W = H_hat.conjugate().T@(np.linalg.inv(H_hat@H_hat.conjugate().T + (1./rho)*np.eye(N_t)))
         Rx_SNR = 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
 
 
@@ -708,16 +707,15 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         # Eb/N0 at the transmitter
         Tx_EbN0_ = snr_dB - dB(C)
         Tx_EbN0.append(Tx_EbN0_)
+
+        print(f'Symbol power at the transmitter is: {P_sym_dB:.4f} dBm')
+        print(f'Noise power at the transmitter is: {noise_power_dB:.4f} dBm')        
+        print(f'EbN0 at the transmitter (per stream): {Tx_EbN0_:.4f} dB')
         
         if Tx_EbN0_ < -1.59:
             print('** Outage at the transmitter **')
-        
-        print(f'Symbol power at the transmitter is: {P_sym_dB:.4f} dBm')
-        print(f'Noise power at the transmitter is: {noise_power_dB:.4f} dBm')
-        print(f'Average signal SNR at the transmitter: {snr_dB:.4f} dB')
-        print(f'EbN0 at the transmitter (per stream): {Tx_EbN0_:.4f} dB')
         print()
-        
+                
         noise_power = linear(noise_power_dB)
         
         # TODO: Introduce a precoder
@@ -770,6 +768,7 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         # The received symbol power *before* equalization impact
         P_sym_rx = P_sym * np.linalg.norm(H_hat, ord='fro') ** 2
         P_sym_rx_dB = dB(P_sym_rx)
+        Rx_SNR_ = dB(rho * np.linalg.norm(H_hat, ord='fro') ** 2)
         
         # Compute the path loss, which is basically the channel effect
         PL.append(P_sym_dB - P_sym_rx_dB)
@@ -778,7 +777,8 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         # Channel equalization
         # Now the received SNR per antenna (per symbol) due to the receiver
         # SNR per antenna and SNR per symbol are equal (one is average of the other)        
-        W, Rx_SNRs_ = equalize_channel(H_hat, algorithm=equalizer, rho=rho)
+        W, Rx_SNRs_eq = equalize_channel(H_hat, algorithm=equalizer, Px=Ex*Df, rho=rho)
+        Rx_SNRs_eq = [dB(r) for r in Rx_SNRs_eq]
         
         # An optimal equalizer should fulfill WH_hat = I_{N_t}     
         # Thus z = x_hat + v 
@@ -796,22 +796,26 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
             
         # Now let us find the SNR and Eb/N0 *after* equalization
         P_sym_rx_eq = P_sym * np.linalg.norm(W@H_hat, ord='fro') ** 2
-        received_noise_power = noise_power * np.linalg.norm(W, ord='fro') ** 2
+        received_noise_powers = noise_power * np.real(np.diag(W.conjugate().T@W)) # np.linalg.norm(W, ord='fro') ** 2
         
         # Find the average receive SNR (per signal)
-        Rx_SNR_ = dB(P_sym_rx_eq) - dB(received_noise_power)
+        Rx_SNRs_ = [dB(P_sym_rx_eq) - dB(p) for p in received_noise_powers]
+        
+        # TODO: Note Rx_SNRs_ and Rx_SNRs_eq must be equal        
         ########################################################################
 
         # Now the received SNR per antenna (per symbol) due to the receiver        
-        Rx_SNRs_ = [dB(x) for x in Rx_SNRs_]        
+        Rx_SNRs_ = [dB(x) for x in Rx_SNRs_]
         SNR_Rx.append(Rx_SNRs_)
+        
+        # TODO:  Who is Rx_SNR_??
         
         # Compute the average EbN0 at the receiver
         Rx_EbN0_ = dB(linear(Rx_SNR_) / C)
         Rx_EbN0.append(Rx_EbN0_)
 
         print(f'Average signal SNR at the receiver: {Rx_SNR_:.4f} dB')
-        print('Symbol SNR at the receiver (per stream): {} dB'.format(Rx_SNRs_))
+        print('Symbol SNR at the receiver (per stream): {} dB'.format(Rx_SNRs_eq))
         print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
         
         if Rx_EbN0_ < -1.59:
