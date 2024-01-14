@@ -48,6 +48,7 @@ N_r = 2
 N_t = 2
 f_c = 1.8e6 # in Hz
 quantization_b = np.inf
+shadowing_std = 8  # dB
 
 crc_polynomial = 0b1001_0011
 crc_length = 24 # bits
@@ -519,21 +520,24 @@ def ML_detect_symbol(symbols, alphabet):
     return information, symbols, [bits_i, bits_q], bits
     
 
-def equalize_channel(H, algorithm, SNR=None):
-    # SNR is linear.
+def equalize_channel(H_hat, algorithm, rho=None):
     # Somehow when N_t = 4, the MMSE misbehaves.
+    # rho is linear (non dB).  So is Rx_SNR.
     
-    N_r, N_t = H.shape
+    N_r, N_t = H_hat.shape
     
     if algorithm == 'ZF':
-        W = np.linalg.pinv(H)        
+        W = np.linalg.pinv(H_hat)
+        Rx_SNR = rho / np.diag(np.real(np.linalg.inv(H_hat.conjugate().T@H_hat)))
     if algorithm == 'MMSE':
-        assert(SNR is not None)
-        W = np.linalg.inv(H@H.conjugate().T + (1./SNR)*np.eye(N_t))@H.conjugate().T
-    
+        assert(rho is not None)
+        W = np.linalg.inv(H_hat@H_hat.conjugate().T + (1./rho)*np.eye(N_t))@H_hat.conjugate().T
+        Rx_SNR = 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
+
+
     assert(W.shape == (N_r, N_t))
     
-    return W
+    return W, Rx_SNR
 
         
 def estimate_channel(X_p, Y_p, noise_power, algorithm, random_state=None):
@@ -697,7 +701,7 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         P_sym_dB = dB(Ex * Df / N_t) + 30 # in dBm
         P_sym = linear(P_sym_dB)
         
-        # Noise power
+        # Noise power                
         noise_power_dB = P_sym_dB - snr_dB # in dBm
         noise_powers.append(noise_power_dB)
         
@@ -708,9 +712,11 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         if Tx_EbN0_ < -1.59:
             print('** Outage at the transmitter **')
         
+        print(f'Symbol power at the transmitter is: {P_sym_dB:.4f} dBm')
         print(f'Noise power at the transmitter is: {noise_power_dB:.4f} dBm')
-        print(f'Symbol SNR at the transmitter (per stream): {snr_dB:.4f} dB')
+        print(f'Average signal SNR at the transmitter: {snr_dB:.4f} dB')
         print(f'EbN0 at the transmitter (per stream): {Tx_EbN0_:.4f} dB')
+        print()
         
         noise_power = linear(noise_power_dB)
         
@@ -747,7 +753,7 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
-        
+        print()
         channel_mse.append(channel_estimation_mse)
 
         # For future:  If channel MSE is greater than certain value, then CSI
@@ -770,7 +776,9 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         
         # Equalizer to remove channel effect
         # Channel equalization
-        W = equalize_channel(H_hat, algorithm=equalizer, SNR=rho)
+        # Now the received SNR per antenna (per symbol) due to the receiver
+        # SNR per antenna and SNR per symbol are equal (one is average of the other)        
+        W, Rx_SNRs_ = equalize_channel(H_hat, algorithm=equalizer, rho=rho)
         
         # An optimal equalizer should fulfill WH_hat = I_{N_t}     
         # Thus z = x_hat + v 
@@ -790,12 +798,8 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         P_sym_rx_eq = P_sym * np.linalg.norm(W@H_hat, ord='fro') ** 2
         received_noise_power = noise_power * np.linalg.norm(W, ord='fro') ** 2
         
-        # Find the average receive SNR
+        # Find the average receive SNR (per signal)
         Rx_SNR_ = dB(P_sym_rx_eq) - dB(received_noise_power)
-        
-        # Now the received SNR per antenna (per symbol) due to the receiver
-        # SNR per antenna and SNR per symbol are equal (one is average of the other)
-        Rx_SNRs_ = MIMO_receive(rho, H_hat, algorithm=equalizer)
         ########################################################################
 
         # Now the received SNR per antenna (per symbol) due to the receiver        
@@ -806,12 +810,13 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         Rx_EbN0_ = dB(linear(Rx_SNR_) / C)
         Rx_EbN0.append(Rx_EbN0_)
 
-        if Rx_EbN0_ < -1.59:
-            print('** Outage at the receiver **')
-                
-        print(f'Average symbol SNR at the receiver (per stream): {Rx_SNR_:.4f} dB')
+        print(f'Average signal SNR at the receiver: {Rx_SNR_:.4f} dB')
         print('Symbol SNR at the receiver (per stream): {} dB'.format(Rx_SNRs_))
         print(f'EbN0 at the receiver (per stream): {Rx_EbN0_:.4f} dB')
+        
+        if Rx_EbN0_ < -1.59:
+            print('** Outage at the receiver **')                
+        print()
         
         # Detection of symbols (symbol star is the centroid of the constellation)  
         x_info_hat, _, _, x_bits_hat = ML_detect_symbol(x_sym_hat, alphabet)
@@ -860,18 +865,6 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         
     return np.arange(n_transmissions), Ex, SERs, noise_powers, SNR_Rx, PL, BERs, BLER, Tx_EbN0, Rx_EbN0, channel_mse, bit_rate_per_stream, Nsc, data_rx_
 
-
-def MIMO_receive(rho, H_hat, algorithm):
-    # Returns SNR per antenna
-    # rho is linear (non dB).  So is Rx_SNR.
-
-    _, N_t = H_hat.shape
-    
-    if algorithm == 'ZF':
-        return rho / np.diag(np.real(np.linalg.inv(H_hat.conjugate().T@H_hat)))
-    if algorithm == 'MMSE':    
-        return 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
-    
     
 def dB(x):
     return 10 * np.log10(x)
@@ -1008,7 +1001,7 @@ def run_simulation(file_name, codeword_size, channel_matrix, equalizer, constell
 # 1) Create a channel
 G = compute_large_scale_fading(d=1, f_c=f_c)
 # H = create_rayleigh_channel(N_r=N_r, N_t=N_t)
-H = create_ricean_channel(N_r=N_r, N_t=N_t, K=0)
+H = create_ricean_channel(N_r=N_r, N_t=N_t, K=0, sigma_dB=shadowing_std)
 
 # 2) Run the simulation on this channel
 df_output = run_simulation(file_name, codeword_size, H, MIMO_equalizer, 
