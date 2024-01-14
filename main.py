@@ -39,13 +39,13 @@ from sklearn.preprocessing import MinMaxScaler
 file_name = 'faris.bmp' # either a file name or a payload
 payload_size = 0 # 30000 # bits
 constellation = 'QAM'
-M_constellation = 16
+M_constellation = 64
 MIMO_equalizer = 'MMSE'
 seed = 7
 codeword_size = 1024 # bits
 n_pilot = 4
-N_r = 2
-N_t = 2
+N_r = 4
+N_t = 4
 f_c = 1.8e6 # in Hz
 quantization_b = np.inf
 shadowing_std = 8  # dB
@@ -531,8 +531,9 @@ def equalize_channel(H_hat, algorithm, rho=None):
     if algorithm == 'MMSE':
         assert(rho is not None)
         W = H_hat.conjugate().T@(np.linalg.inv(H_hat@H_hat.conjugate().T + (1./rho)*np.eye(N_t)))
-        Rx_SNR = 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
-
+        #Rx_SNR = 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
+        WWH = W@W.conjugate().T
+        Rx_SNR = rho / np.real(np.diag(WWH))
 
     assert(W.shape == (N_r, N_t))
     
@@ -807,8 +808,6 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         # Now the received SNR per antenna (per symbol) due to the receiver        
         Rx_SNRs_ = [dB(x) for x in Rx_SNRs_]
         SNR_Rx.append(Rx_SNRs_)
-        
-        # TODO:  Who is Rx_SNR_??
         
         # Compute the average EbN0 at the receiver
         Rx_EbN0_ = dB(linear(Rx_SNR_) / C)
