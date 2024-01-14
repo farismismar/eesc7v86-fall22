@@ -520,7 +520,7 @@ def ML_detect_symbol(symbols, alphabet):
     return information, symbols, [bits_i, bits_q], bits
     
 
-def equalize_channel(H_hat, algorithm, Px=None, rho=None):
+def equalize_channel(H_hat, algorithm, rho=None):
     # rho is linear (non dB).  So is Rx_SNR.
     
     N_r, N_t = H_hat.shape
@@ -776,8 +776,8 @@ def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_po
         # Equalizer to remove channel effect
         # Channel equalization
         # Now the received SNR per antenna (per symbol) due to the receiver
-        # SNR per antenna and SNR per symbol are equal (one is average of the other)        
-        W, Rx_SNRs_eq = equalize_channel(H_hat, algorithm=equalizer, Px=Ex*Df, rho=rho)
+        # SNR per antenna and SNR per symbol are the same thing technically.
+        W, Rx_SNRs_eq = equalize_channel(H_hat, algorithm=equalizer, rho=rho)
         Rx_SNRs_eq = [dB(r) for r in Rx_SNRs_eq]
         
         # An optimal equalizer should fulfill WH_hat = I_{N_t}     
