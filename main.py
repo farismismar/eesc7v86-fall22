@@ -36,26 +36,28 @@ from tensorflow.compat.v1 import set_random_seed
 from sklearn.preprocessing import MinMaxScaler
 
 # System parameters
-file_name = None # either a file name or a payload
-payload_size = 30000 # bits
+file_name = 'faris.bmp' # either a file name or a payload
+payload_size = 0 # 30000 # bits
 constellation = 'QAM'
 M_constellation = 16
+MIMO_equalizer = 'ZF'
 seed = 7
 codeword_size = 1024 # bits
-n_pilot = 2
+n_pilot = 4
 N_r = 2
 N_t = 2
 f_c = 1.8e6 # in Hz
+quantization_b = np.inf
 
 crc_polynomial = 0b1001_0011
-crc_length = 4 # bits
+crc_length = 24 # bits
 
-Tx_SNRs = [-3, 0, 3, 10, 20, 30, 35, 40, 50] # in dB
+Tx_SNRs = [3, 10, 20, 30, 40, 45, 50, 60, 70, 80] # in dB
 
 prefer_gpu = True
 ##################
 
-__release_date__ = '2024-01-07'
+__release_date__ = '2024-01-13'
 __ver__ = '0.4'
 
 ##################
@@ -83,29 +85,29 @@ def _create_constellation_psk(M):
         return None
 
     k = int(k)
-    centroids = pd.DataFrame(columns=['m', 'x_I', 'x_Q'])
+    constellation = pd.DataFrame(columns=['m', 'x_I', 'x_Q'])
 
     for m in np.arange(M):
         centroid_ = pd.DataFrame(data={'m': int(m),
                                        'x_I': np.sqrt(1 / 2) * np.cos(2*np.pi/M*m + np.pi/M),
                                        'x_Q': np.sqrt(1 / 2) * np.sin(2*np.pi/M*m + np.pi/M)}, index=[m])
-        if centroids.shape[0] == 0:
-            centroids = centroid_.copy()
+        if constellation.shape[0] == 0:
+            constellation = centroid_.copy()
         else:
-            centroids = pd.concat([centroids, centroid_], ignore_index=True)
+            constellation = pd.concat([constellation, centroid_], ignore_index=True)
     
-    gray = centroids['m'].apply(lambda x: decimal_to_gray(x, k))
-    centroids['I'] = gray.str[:(k//2)]
-    centroids['Q'] = gray.str[(k//2):]
+    gray = constellation['m'].apply(lambda x: decimal_to_gray(x, k))
+    constellation['I'] = gray.str[:(k//2)]
+    constellation['Q'] = gray.str[(k//2):]
 
-    centroids.loc[:, 'x'] = centroids.loc[:, 'x_I'] + 1j * centroids.loc[:, 'x_Q']
+    constellation.loc[:, 'x'] = constellation.loc[:, 'x_I'] + 1j * constellation.loc[:, 'x_Q']
     
     # Normalize the transmitted symbols    
     # The average power is normalized to unity
-    P_average = np.mean(np.abs(centroids.loc[:, 'x']) ** 2)
-    centroids.loc[:, 'x'] /= np.sqrt(P_average)
+    P_average = np.mean(np.abs(constellation.loc[:, 'x']) ** 2)
+    constellation.loc[:, 'x'] /= np.sqrt(P_average)
     
-    return centroids
+    return constellation
 
 
 # Constellation based on Gray code
@@ -155,6 +157,65 @@ def _create_constellation_qam(M):
     return constellation
 
 
+def quantize(x, b):
+    if b == np.inf:
+        return x
+        
+    m, n = x.shape
+    x = x.flatten()
+    
+    x_re = np.real(x)
+    x_im = np.imag(x)
+
+    x_re_b = _lloyd_max_quantization(x_re, b)
+    x_im_b = _lloyd_max_quantization(x_im, b)
+    
+    x_b = x_re_b + 1j * x_im_b
+    
+    return x_b.reshape((m, n))
+
+
+def _lloyd_max_quantization(x, b, max_iteration=100):
+    # derives the quantized vector
+    # https://gist.github.com/PrieureDeSion
+    # https://github.com/stillame96/lloyd-max-quantizer
+    from utils import normal_dist, expected_normal_dist, MSE_loss, LloydMaxQuantizer
+    
+    repre = LloydMaxQuantizer.start_repre(x, b)
+    min_loss = 1.0
+
+    for i in range(max_iteration):
+        thre = LloydMaxQuantizer.threshold(repre)
+        # In case wanting to use with another mean or variance,
+        # need to change mean and variance in utils.py file
+        repre = LloydMaxQuantizer.represent(thre, expected_normal_dist, normal_dist)
+        x_hat_q = LloydMaxQuantizer.quant(x, thre, repre)
+        loss = MSE_loss(x, x_hat_q)
+
+        # # Print every 10 loops
+        # if(i%10 == 0 and i != 0):
+        #     print('iteration: ' + str(i))
+        #     print('thre: ' + str(thre))
+        #     print('repre: ' + str(repre))
+        #     print('loss: ' + str(loss))
+        #     print('++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+
+        # Keep the threhold and representation that has the lowest MSE loss.
+        if(min_loss > loss):
+            min_loss = loss
+            min_thre = thre
+            min_repre = repre
+
+    # print('min loss: ' + str(min_loss))
+    # print('min thresholds: ' + str(min_thre))
+    # print('min representative levels: ' + str(min_repre))
+    
+    # x_hat_q with the lowest amount of loss.
+    best_x_hat_q = LloydMaxQuantizer.quant(x, min_thre, min_repre)
+    
+    return best_x_hat_q
+
+
 def decimal_to_gray(n, k):
     gray = n ^ (n >> 1)
     gray = bin(gray)[2:]
@@ -177,8 +238,7 @@ def _plot_constellation(constellation):
     plt.grid(True)
     plt.xlabel('I')
     plt.ylabel('Q')
-    plt.tight_layout()
-#    plt.show()
+    plt.show()
     tikzplotlib.save('constellation.tikz')
     plt.close(fig)
     
@@ -290,14 +350,33 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
     return crc
 
 
-def create_rayleigh_channel(N_r, N_t):
-    global G    
+def create_ricean_channel(N_r, N_t, K, sigma_dB=8):
+    global G # Pathloss in dB
+    
+    G_fading = dB(G) - sigma_dB * np_random.normal(loc=0, scale=1, size=(N_r, N_t))
+    G_fading = np.array([linear(g) for g in G_fading])
+    
+    mu = np.sqrt(K / (1 + K))
+    sigma = np.sqrt(1 / (1 + K))
+    
+    # Rician fading
+    H = np.sqrt(G / 2) * np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t)) + \
+        1j * np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t))
+    
+    return H
+
+
+def create_rayleigh_channel(N_r, N_t, sigma_dB=8):
+    global G # Pathloss in dB
+    
+    G_fading = dB(G) - sigma_dB * np_random.normal(loc=0, scale=1, size=(N_r, N_t))
+    G_fading = np.array([linear(g) for g in G_fading])
+    
     # Rayleigh fading with G being the large scale fading
     H = np.sqrt(G / 2) * (np_random.normal(0, 1, size=(N_r, N_t)) + \
                           1j * np_random.normal(0, 1, size=(N_r, N_t)))
     
     # TODO:  if fading then add to H the coefficients.
-    
     return H
 
 
@@ -440,13 +519,17 @@ def ML_detect_symbol(symbols, alphabet):
     return information, symbols, [bits_i, bits_q], bits
     
 
-def equalize_channel(H, algorithm):
-    global N_t, N_r
+def equalize_channel(H, algorithm, SNR=None):
+    # SNR is linear.
+    # Somehow when N_t = 4, the MMSE misbehaves.
+    
+    N_r, N_t = H.shape
     
     if algorithm == 'ZF':
-        W = np.linalg.pinv(H)
+        W = np.linalg.pinv(H)        
     if algorithm == 'MMSE':
-        W = np.zeros(N_t) # TODO.
+        assert(SNR is not None)
+        W = np.linalg.inv(H@H.conjugate().T + (1./SNR)*np.eye(N_t))@H.conjugate().T
     
     assert(W.shape == (N_r, N_t))
     
@@ -512,9 +595,18 @@ def channel_eigenmodes(H):
     return eigenmodes
 
     
-def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
+def transmit_receive(data, codeword_size, alphabet, H, equalizer, snr_dB, crc_polynomial, crc_length, n_pilot, perfect_csi=False):
+    global quantization_b
+    
+    k = np.log2(alphabet.shape[0]).astype(int)
+    rho = linear(snr_dB)
+    
     if codeword_size < k:
         raise ValueError("Codeword size is too small for the chosen modulation")
+    
+    if codeword_size / k != codeword_size // k:
+        codeword_size = int(np.ceil(codeword_size / k)) * k
+        print(f"WARNING: Codeword size is not an integer multiple of {k}.  Revising it to {codeword_size} bits.")
     
     SERs = []
     BERs = []
@@ -566,6 +658,7 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
     PL = []
     data_rx = []
     noise_powers = []
+    channel_mse = []
     
     if b < 10000:
         print('Warning: Small number of bits can cause curves to differ from theoretical ones due to insufficient number of samples.')
@@ -596,12 +689,12 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
         pad_length = int(N_t * np.ceil((len(x_sym) + effective_crc_length_symbols) / N_t)) - len(x_sym) - effective_crc_length_symbols # in symbols
         x_sym_crc = np.r_[x_sym, np.zeros(pad_length), crc_symbols]
         
-        # Symbol energy
+        # Signal energy
         x_sym_crc = x_sym_crc.reshape(-1, N_t).T # Do not be tempted to do the obvious!
-        Es = np.linalg.norm(x_sym_crc, ord=2, axis=0).mean()
+        Ex = np.linalg.norm(x_sym_crc, ord=2, axis=0).mean()
         
         # Symbol power (OFDM resource element)
-        P_sym_dB = dB(Es * Df / N_t) + 30 # in dBm
+        P_sym_dB = dB(Ex * Df / N_t) + 30 # in dBm
         P_sym = linear(P_sym_dB)
         
         # Noise power
@@ -632,36 +725,40 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
         # Debug purposes
         if perfect_csi:
             H = np.eye(N_t)
-        
-        # TODO: Introduce quantization for both Y and Y pilot
-        
+                
         # Channel
         # Since the channel coherence time is assumed constant
         H = H # this line has no meaning except to remind us that the channel changes after coherence time.
         # since every transmission is one TTI = 1 ms.
         
-        # Channel impact 
-        HFx = H@F@x_sym_crc # Impact of the channel on the transmitted symbols
-        Y = HFx + n[:, :x_sym_crc.shape[1]] * np.linalg.norm(HFx, ord=2) / np.sqrt(P_sym)
-        HFP = H@F@P # Impact of the channel on the pilot
+        # Channel impact        
+        Hx = H@x_sym_crc # Impact of the channel on the transmitted symbols
+        Y = Hx + n[:, :x_sym_crc.shape[1]] * np.linalg.norm(Hx, ord=2) / np.sqrt(P_sym)
+        HP = H@P # Impact of the channel on the pilot
         
         # Note that the noise power for the pilot has to be scaled to abide by the SNR_dB
-        T = HFP + n[:, :n_pilot] * np.linalg.norm(P, ord=2) / np.sqrt(P_sym)
+        T = HP + n[:, :n_pilot] * np.linalg.norm(P, ord=2) / np.sqrt(P_sym)
 
         # Estimate the channel
-        H_hatF = estimate_channel(P, T, noise_power, algorithm='LS', random_state=np_random)
-        H_hat = H_hatF@ np.linalg.pinv(F)
-      
+        H_hat = estimate_channel(P, T, noise_power, algorithm='LS', random_state=np_random)        
+        
+        ########################################################################
         error_vector = _vec(H) - _vec(H_hat)
         
         channel_estimation_mse = np.linalg.norm(error_vector, 2) ** 2 / (N_t * N_r)
         print(f'Channel estimation MSE: {channel_estimation_mse:.4f}')
         
+        channel_mse.append(channel_estimation_mse)
+
         # For future:  If channel MSE is greater than certain value, then CSI
         # knowledge scenarios kick in (i.e., CSI is no longer known perfectly to
         # both the transmitter/receiver).
         
-        # TODO: How does F impact W?  Idea removes N_t in the denom.
+        # Introduce quantization for both Y and Y pilot
+        Y_orig = Y
+        T_orig = T
+        Y = quantize(Y_orig, quantization_b)
+        T = quantize(T_orig, quantization_b)
     
         # MIMO Receiver
         # The received symbol power *before* equalization impact
@@ -672,8 +769,8 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
         PL.append(P_sym_dB - P_sym_rx_dB)
         
         # Equalizer to remove channel effect
-        # Channel equalization using ZF
-        W = equalize_channel(H_hatF, algorithm='ZF')
+        # Channel equalization
+        W = equalize_channel(H_hat, algorithm=equalizer, SNR=rho)
         
         # An optimal equalizer should fulfill WH_hat = I_{N_t}     
         # Thus z = x_hat + v 
@@ -690,15 +787,19 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
             x_sym_hat = x_sym_hat[:-pad_length] # no CRC and no padding.
             
         # Now let us find the SNR and Eb/N0 *after* equalization
-        P_sym_rx_eq = P_sym * np.linalg.norm(W@H_hatF, ord='fro') ** 2
+        P_sym_rx_eq = P_sym * np.linalg.norm(W@H_hat, ord='fro') ** 2
         received_noise_power = noise_power * np.linalg.norm(W, ord='fro') ** 2
         
         # Find the average receive SNR
         Rx_SNR_ = dB(P_sym_rx_eq) - dB(received_noise_power)
         
-        # Now the received SNR per antenna due to ZF receiver
-        Rx_SNRs_ = MIMO_receive(Rx_SNR_, H_hatF, algorithm='ZF')
-        
+        # Now the received SNR per antenna (per symbol) due to the receiver
+        # SNR per antenna and SNR per symbol are equal (one is average of the other)
+        Rx_SNRs_ = MIMO_receive(rho, H_hat, algorithm=equalizer)
+        ########################################################################
+
+        # Now the received SNR per antenna (per symbol) due to the receiver        
+        Rx_SNRs_ = [dB(x) for x in Rx_SNRs_]        
         SNR_Rx.append(Rx_SNRs_)
         
         # Compute the average EbN0 at the receiver
@@ -757,19 +858,19 @@ def transmit_receive(data, codeword_size, alphabet, H, k, snr_dB, crc_polynomial
     # Now extract from every transmission 
     data_rx_ = ''.join(data_rx)    
         
-    return np.arange(n_transmissions), Es, SERs, noise_powers, SNR_Rx, PL, BERs, BLER, Tx_EbN0, Rx_EbN0, bit_rate_per_stream, Nsc, data_rx_
+    return np.arange(n_transmissions), Ex, SERs, noise_powers, SNR_Rx, PL, BERs, BLER, Tx_EbN0, Rx_EbN0, channel_mse, bit_rate_per_stream, Nsc, data_rx_
 
 
-def MIMO_receive(Rx_SNR_dB, H_hat, algorithm):
+def MIMO_receive(rho, H_hat, algorithm):
     # Returns SNR per antenna
-    # TODO:  Check the implementation and derivation
-    
+    # rho is linear (non dB).  So is Rx_SNR.
+
     _, N_t = H_hat.shape
     
     if algorithm == 'ZF':
-        return (linear(Rx_SNR_dB) / N_t) / np.diag(np.real((np.linalg.inv(H_hat.conjugate().T@H_hat))))
+        return rho / np.diag(np.real(np.linalg.inv(H_hat.conjugate().T@H_hat)))
     if algorithm == 'MMSE':    
-        return 1 / np.diag(np.real(np.linalg.inv((linear(Rx_SNR_dB) / N_t) * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
+        return 1 / np.diag(np.real(np.linalg.inv(rho * np.linalg.inv(H_hat.conjugate().T@H_hat) + np.eye(N_t)))) - 1
     
     
 def dB(x):
@@ -778,6 +879,7 @@ def dB(x):
 
 def linear(x):
     return 10 ** (x / 10.)
+
 
 def read_bitmap(file, word_length=8):
     global payload_size
@@ -833,7 +935,7 @@ def _plot_bitmaps(data1, data2):
     ax2.axis('off')
     
     plt.tight_layout()
-    # plt.show()
+    plt.show()
     plt.close(fig)
     
     
@@ -856,13 +958,16 @@ def generate_plot(df, xlabel, ylabel):
     
 
 def compute_large_scale_fading(d, f_c, pl_exp=2):
+    global np_random
+    
     l = c / f_c
     G = (4 * pi * d / l) ** pl_exp
-
+    assert (G < 1)
+    
     return G
 
         
-def run_simulation(file_name, codeword_size, h, constellation, k_constellation, Tx_SNRs, crc_polynomial, crc_length, n_pilot):
+def run_simulation(file_name, codeword_size, channel_matrix, equalizer, constellation, Tx_SNRs, crc_polynomial, crc_length, n_pilot):
     alphabet = create_constellation(constellation=constellation, M=int(2 ** k_constellation))
     _plot_constellation(constellation=alphabet)
     data = read_bitmap(file_name)
@@ -870,11 +975,11 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
     # _plot_bitmaps(data, data)
     df_output = pd.DataFrame()
     for snr in Tx_SNRs:
-        c_i, Es_Tx_i, SER_i, noise_power_i, Rx_SNR_i, PL_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, bit_rate, subcarriers, data_received = \
-            transmit_receive(data, codeword_size, alphabet, h, k_constellation, 
+        c_i, Ex_Tx_i, SER_i, noise_power_i, Rx_SNR_i, PL_i, BER_i, BLER_i, Tx_EbN0_i, Rx_EbN0_i, channel_mse_i, bit_rate, subcarriers, data_received = \
+            transmit_receive(data, codeword_size, alphabet, channel_matrix, equalizer, 
                          snr, crc_polynomial, crc_length, n_pilot, perfect_csi=False)
         df_output_ = pd.DataFrame(data={'Codeword': c_i})
-        df_output_['Es'] = Es_Tx_i
+        df_output_['Ex'] = Ex_Tx_i
         df_output_['SER'] = SER_i
         df_output_['noise_power'] = noise_power_i
         df_output_['Tx_SNR'] = snr
@@ -884,6 +989,7 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
         df_output_['BLER'] = BLER_i
         df_output_['Tx_EbN0'] = Tx_EbN0_i
         df_output_['Rx_EbN0'] = Rx_EbN0_i
+        df_output_['Channel_MSE'] = channel_mse_i
         df_output_['Bit_Rate'] = bit_rate
         df_output_['N_subcarriers'] = subcarriers
         
@@ -901,16 +1007,17 @@ def run_simulation(file_name, codeword_size, h, constellation, k_constellation, 
 
 # 1) Create a channel
 G = compute_large_scale_fading(d=1, f_c=f_c)
-H = create_rayleigh_channel(N_r=N_r, N_t=N_t)
+# H = create_rayleigh_channel(N_r=N_r, N_t=N_t)
+H = create_ricean_channel(N_r=N_r, N_t=N_t, K=0)
 
 # 2) Run the simulation on this channel
-df_output = run_simulation(file_name, codeword_size, H, constellation, 
-                           k_constellation, Tx_SNRs, crc_polynomial, crc_length,
+df_output = run_simulation(file_name, codeword_size, H, MIMO_equalizer, 
+                           constellation, Tx_SNRs, crc_polynomial, crc_length,
                            n_pilot)
 df_output.to_csv('output.csv', index=False)
 
 # 3) Generate plot
-xlabel = 'Tx_SNR'
+xlabel = 'Rx_EbN0'
 ylabel = 'Avg_BER'
 
 generate_plot(df=df_output, xlabel=xlabel, ylabel=ylabel)
