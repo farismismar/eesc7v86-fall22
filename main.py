@@ -354,7 +354,7 @@ def compute_crc(x_bits_orig, crc_polynomial, crc_length):
 def create_ricean_channel(N_r, N_t, K, sigma_dB=8):
     global G # Pathloss in dB
     
-    G_fading = dB(G) - sigma_dB * np_random.normal(loc=0, scale=1, size=(N_r, N_t))
+    G_fading = dB(G) - np_random.normal(loc=0, scale=np.sqrt(sigma_dB), size=(N_r, N_t))
     G_fading = np.array([linear(g) for g in G_fading])
     
     mu = np.sqrt(K / (1 + K))
@@ -370,7 +370,7 @@ def create_ricean_channel(N_r, N_t, K, sigma_dB=8):
 def create_rayleigh_channel(N_r, N_t, sigma_dB=8):
     global G # Pathloss in dB
     
-    G_fading = dB(G) - sigma_dB * np_random.normal(loc=0, scale=1, size=(N_r, N_t))
+    G_fading = dB(G) - np_random.normal(loc=0, scale=np.sqrt(sigma_dB), size=(N_r, N_t))
     G_fading = np.array([linear(g) for g in G_fading])
     
     # Rayleigh fading with G being the large scale fading
@@ -541,8 +541,7 @@ def equalize_channel(H_hat, algorithm, rho=None):
 
         
 def estimate_channel(X_p, Y_p, noise_power, algorithm, random_state=None):
-    # This is for least square (LS) estimation
-    # and the linear minimum mean squared error (L-MMSE):
+    # This is for least square (LS) estimation    
     N_t, _ = X_p.shape
     
     if not np.allclose(X_p@X_p.T, np.eye(N_t)):
@@ -551,12 +550,6 @@ def estimate_channel(X_p, Y_p, noise_power, algorithm, random_state=None):
     if algorithm == 'LS':
         # This is least square (LS) estimation
         H_hat = Y_p@X_p.conjugate().T
-
-    if algorithm == 'L-MMSE':    
-        # TODO:  Revisit.
-        # This is the L-MMSE estimation after introducing G in the matrix H
-        #H_hat = np.sqrt(G) * Y_p@X_p.conjugate().T@np.linalg.inv((G + noise_power)*np.eye(N_t))
-        H_hat =  Y_p@X_p.conjugate().T@np.linalg.inv((1 + noise_power)*np.eye(N_t))
     
     return H_hat
   
@@ -953,11 +946,12 @@ def generate_plot(df, xlabel, ylabel):
     plt.close(fig)
     
 
-def compute_large_scale_fading(d, f_c, pl_exp=2):
+def compute_large_scale_fading(d, f_c, G_t=1, G_r=1, pl_exp=2):
     global np_random
     
     l = c / f_c
-    G = (4 * pi * d / l) ** pl_exp
+    G = G_t * G_r * (l / (4 * pi * d)) ** pl_exp
+    
     assert (G < 1)
     
     return G
@@ -1002,7 +996,7 @@ def run_simulation(file_name, codeword_size, channel_matrix, equalizer, constell
 
 
 # 1) Create a channel
-G = compute_large_scale_fading(d=1, f_c=f_c)
+G = compute_large_scale_fading(d=100, f_c=f_c)
 # H = create_rayleigh_channel(N_r=N_r, N_t=N_t)
 H = create_ricean_channel(N_r=N_r, N_t=N_t, K=0, sigma_dB=shadowing_std)
 
