@@ -4,7 +4,7 @@ This is a code repository that allows its user to generate statistics of a multi
 
 Several channel operations are performed: channel estimation, channel equalization, and symbol detection.
 
-Channel estimation is performed through the use of least squares and linear minimum mean squared error (L-MMSE) estimation formulas.
+Channel estimation is performed through the use of least squares estimation formula.
 
 Channel equalization is performed through the choices of ZF and MMSE equalizers.
 
