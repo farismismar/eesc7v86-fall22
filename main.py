@@ -39,7 +39,7 @@ from sklearn.preprocessing import MinMaxScaler
 file_name = 'faris.bmp' # either a file name or a payload
 payload_size = 0 # 30000 # bits
 constellation = 'QAM'
-M_constellation = 64
+M_constellation = 16
 MIMO_equalizer = 'ZF'
 seed = 7
 n_pilot = 4
@@ -52,7 +52,7 @@ shadowing_std = 8  # dB
 K_factor = 4
 
 crc_polynomial = 0b1001_0011
-crc_length = 24 # bits
+crc_length = 8 # bits
 
 Tx_SNRs = [-3,0,3,10,15,20,25,30,35] # in dB
 
