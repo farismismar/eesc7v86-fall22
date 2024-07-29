@@ -30,3 +30,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28 |
 | 0.3      | 2024-01-03 | Major revision and error fixes. |
 | 0.4      | 2024-01-13 | More features. |
+| 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
