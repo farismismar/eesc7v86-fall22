@@ -784,7 +784,7 @@ def _matrix_vector_multiplication(A, B):
     return ans
 
 
-def plot_performance(df, xlabel, ylabel, semilogy=True):
+def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     cols = list(set([xlabel, ylabel, 'snr_dB']))
     df = df[cols]
     df_plot = df.groupby('snr_dB').mean().reset_index()
@@ -802,6 +802,8 @@ def plot_performance(df, xlabel, ylabel, semilogy=True):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
+    if filename is not None:
+        plt.savefig(f'performance_{ylabel}_{filename}.pdf', format='pdf', dpi=fig.dpi)
     plt.show()
     plt.close(fig)
     
@@ -825,7 +827,7 @@ def plot_channel(channel, filename=None):
     
     plt.tight_layout()
     if filename is not None:
-        plt.savefig(f'channel_{filename}.pdf', format='pdf')
+        plt.savefig(f'channel_{filename}.pdf', format='pdf', dpi=fig.dpi)
     plt.show()
     plt.close(fig)
 
@@ -858,7 +860,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     P = generate_pilot_symbols(N_t, n_pilot, P_TX, kind='dft')
     H = create_channel(N_sc, N_r, N_t, channel=channel_type, shadow_fading_margin_dB=8)
     
-    plot_channel(H)
+    plot_channel(H, filename=channel_type)
 
     df = pd.DataFrame(columns=['snr_dB', 'n', 'snr_transmitter_dB', 
                                'EbN0_transmitter_dB', 'channel_estimation_error', 
@@ -981,5 +983,5 @@ df_results, df_detailed_results = run_simulation(transmit_SNR_dB,
                                                  N_sc, N_r, N_t, 
                                                  max_transmissions=500)
 
-plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BER', semilogy=True)
-plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BLER', semilogy=True)
+plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BER', semilogy=True, filename='BER')
+plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BLER', semilogy=True, filename='BLER')
