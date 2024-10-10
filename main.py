@@ -8,6 +8,8 @@ Created on Wed Sep 18 15:41:51 2024
 
 import numpy as np
 import pandas as pd
+from scipy.constants import c
+
 import time
 
 import matplotlib.pyplot as plt
@@ -15,29 +17,36 @@ import tikzplotlib
 
 from sklearn.cluster import KMeans
 
+import pdb
+
 ################################################
 # Single OFDM symbol and single user simulator
 ################################################
 
 ###############################################################################
 # Parameters
-N_t = 4 # Number of transmit antennas
-N_r = 4  # Number of receive antennas per user
-N_sc = 64 # Number of subcarriers
-P_TX = 40 # in Watts
-transmit_SNR_dB = [-5, 0, 5, 10, 15, 20, 25, 30][::-1]  # Transmit SNR in dB
+N_t = 4                                  # Number of transmit antennas
+N_r = 4                                  # Number of receive antennas per user
+N_sc = 64                                # Number of subcarriers
+P_TX = 1                                 # in Watts
+transmit_SNR_dB = [-5, 0, 5, 10, 15, 20, 25, 30][::-1]  # Transmit SNR in dB  # Transmit SNR in dB
 
 constellation = 'QAM'
 M_constellation = 16
 
-n_pilot = 4 # Number of pilots for channel estimation
+n_pilot = 4                              # Number of pilots for channel estimation
 
 MIMO_estimation = 'perfect' # perfect, LS, LMMSE
-MIMO_equalization = 'MMSE' # MMSE, ZF
+MIMO_equalization = 'ZF' # MMSE, ZF
 symbol_detection = 'ML' # ML, kmeans
 
 crc_generator = 0b1100_1101  # CRC generator polynomial
 ###############################################################################
+
+plt.rcParams['font.family'] = "Arial"
+plt.rcParams['font.size'] = "14"
+
+prefer_gpu = True
 
 seed = 42 # Reproduction
 np_random = np.random.RandomState(seed=seed)
@@ -169,36 +178,53 @@ def generate_transmit_symbols(N_sc, N_t, alphabet):
     return x_information, x_symbols, [x_b_i, x_b_q]
 
 
-def generate_pilot_symbols(N_t, n_pilot):
-    # TODO:  This function can be re-written using better estimation codes.
+def generate_pilot_symbols(N_t, n_pilot, kind='dft'):
     global np_random
     
-    # Check if the dimensions are valid for the operation
-    if n_pilot < N_t:
-        raise ValueError("The length of the training sequence should be greater than or equal to the number of transmit antennas.")
+    if kind == 'dft':
+        # Generate a DFT (Discrete Fourier Transform) matrix of size N_t x N_t
+        dft_matrix = np.fft.fft(np.eye(N_t))
+        
+        # Select the first n_pilot rows (if n_pilot < N_t)
+        pilot_matrix = dft_matrix[:n_pilot]
+        
+        # Normalize the DFT-based pilot matrix
+        pilot_matrix /= np.sqrt(N_t)
     
-    # Compute a unitary matrix from a combinatoric of e
-    I = np.eye(N_t)
-    idx = np_random.choice(range(N_t), size=N_t, replace=False)
-    Q = I[:, idx] 
+    if kind == 'qr':
+        # Generate a random complex Gaussian matrix
+        random_matrix = np.sqrt(1 / 2) * (np_random.randn(n_pilot, N_t) + \
+                                          1j * np_random.randn(n_pilot, N_t))
+        
+        # Perform QR decomposition on the random matrix to get a unitary matrix
+        Q, R = np.linalg.qr(random_matrix)
+        
+        # Ensure Q is unitary (the first n_pilot rows are orthonormal)
+        pilot_matrix = Q[:, :N_t]
     
-    assert(np.allclose(Q@Q.T, np.eye(N_t)))  # Q is indeed unitary, but square.
-    
-    # # Scale the unitary matrix
-    # Q /= np.linalg.norm(Q, ord='fro')
-    
-    # To make a semi-unitary, we need to post multiply with a rectangular matrix
-    # Now we need a rectangular matrix (fat)
-    A = np.zeros((N_t, n_pilot), int)
-    np.fill_diagonal(A, 1)
-    X_p = Q @ A
-    
-    # The pilot power should be SNR / noise power
-    # What matrix X_pX_p* = I (before scaling)
-    assert(np.allclose(X_p@X_p.T, np.eye(N_t)))  # This is it
-    
-    # The training sequence is X_p.  It has n_pilot rows and N_t columns
-    return X_p.T
+    if kind == 'semi-unitary':
+        # Compute a unitary matrix from a combinatoric of e
+        I = np.eye(N_t)
+        idx = np_random.choice(range(N_t), size=N_t, replace=False)
+        Q = I[:, idx] 
+        
+        assert(np.allclose(Q@Q.T, np.eye(N_t)))  # Q is indeed unitary, but square.
+        
+        # # Scale the unitary matrix
+        # Q /= np.linalg.norm(Q, ord='fro')
+        
+        # To make a semi-unitary, we need to post multiply with a rectangular matrix
+        # Now we need a rectangular matrix (fat)
+        A = np.zeros((N_t, n_pilot), int)
+        np.fill_diagonal(A, 1)
+        X_p = Q @ A
+        
+        assert(np.allclose(X_p@X_p.T, np.eye(N_t)))  # This is it
+        
+        # The training sequence is X_p.  It has n_pilot rows and N_t columns
+        pilot_matrix = X_p.T
+        
+    return pilot_matrix
 
     
 def bits_to_baseband(x_bits, alphabet):
@@ -245,7 +271,7 @@ def channel_effect(H, X, snr_dB):
     N_sc, N_r, N_t = H.shape
 
     # Convert SNR from dB to linear scale
-    snr_linear = 10 ** (snr_dB / 10.)
+    snr_linear = _linear(snr_dB)
 
     # Compute the power of the transmit matrix X
     signal_power = np.mean(_signal_power(X))
@@ -255,7 +281,7 @@ def channel_effect(H, X, snr_dB):
 
     # Generate additive white Gaussian noise (AWGN)
     noise = np.sqrt(noise_power / 2) * (np_random.randn(N_sc, N_r) + 1j * np_random.randn(N_sc, N_r))
-
+    
     received_signal = np.zeros((N_sc, N_r), dtype=np.complex128)
     for sc in range(N_sc):
         received_signal[sc, :] = H[sc, :, :] @ X[sc, :] + noise[sc, :]
@@ -293,7 +319,7 @@ def _equalize_channel_ZF(H):
 
 def _equalize_channel_MMSE(H, snr_dB):
     N_sc, N_r, N_t = H.shape
-    snr_linear = 10 ** (snr_dB / 10.)
+    snr_linear = _linear(snr_dB)
     
     # Hermitian transpose of each subcarrier's H: (N_sc, N_t, N_r)
     H_hermitian = np.conjugate(np.transpose(H, (0, 2, 1)))
@@ -328,7 +354,7 @@ def _estimate_channel_least_squares(X, Y):
 
 def _estimate_channel_LMMSE(X, Y, snr_dB):
     # Assume that RHH is sigma_H^2 I for simplicity.
-    snr_linear = 10 ** (snr_dB / 10.)
+    snr_linear = _linear(snr_dB)
     
     H_ls = _estimate_channel_least_squares(X, Y)
     
@@ -363,8 +389,115 @@ def estimate_channel(X, Y, snr_dB, algorithm):
     return None
 
 
-def create_channel(N_sc, N_r, N_t):
-    return np_random.randn(N_sc, N_r, N_t) + 1j * np.random.randn(N_sc, N_r, N_t)  # Channel matrix
+def quantize(X, b, tol=1e-6, max_iter=100):
+    if np.isinf(b):
+        return X
+    
+    # Implement Lloyd-Max
+    # Number of quantization levels
+    L = 2**b
+
+    # Separate real and imaginary parts
+    X_real = np.real(X)
+    X_imag = np.imag(X)
+
+    # Find min and max values in real and imaginary parts
+    min_real, max_real = np.min(X_real), np.max(X_real)
+    min_imag, max_imag = np.min(X_imag), np.max(X_imag)
+
+    # Initialize the quantization levels (centroids) uniformly between min and max
+    centroids_real = np.linspace(min_real, max_real, L)
+    centroids_imag = np.linspace(min_imag, max_imag, L)
+
+    for _ in range(max_iter):
+        # Step 1: Partition boundaries (midpoints between centroids)
+        boundaries_real = (centroids_real[:-1] + centroids_real[1:]) / 2
+        boundaries_imag = (centroids_imag[:-1] + centroids_imag[1:]) / 2
+
+        # Step 2: Assign each real/imaginary part of X to the nearest centroid
+        X_real_b = np.digitize(X_real, boundaries_real)
+        X_imag_b = np.digitize(X_imag, boundaries_imag)
+
+        # Step 3: Recalculate the centroids
+        new_centroids_real = np.array([X_real[X_real_b == i].mean() if len(X_real[X_real_b == i]) > 0 else centroids_real[i] for i in range(L)])
+        new_centroids_imag = np.array([X_imag[X_imag_b == i].mean() if len(X_imag[X_imag_b == i]) > 0 else centroids_imag[i] for i in range(L)])
+
+        # Step 4: Check for convergence
+        if np.max(np.abs(new_centroids_real - centroids_real)) < tol and np.max(np.abs(new_centroids_imag - centroids_imag)) < tol:
+            break
+
+        centroids_real = new_centroids_real
+        centroids_imag = new_centroids_imag
+
+    # Quantize X to the nearest centroids
+    X_real_b = centroids_real[np.digitize(X_real, boundaries_real)]
+    X_imag_b = centroids_imag[np.digitize(X_imag, boundaries_imag)]
+
+    # Combine the real and imaginary parts
+    X_b = X_real_b + 1j * X_imag_b
+
+    return X_b
+    
+    
+def create_channel(N_sc, N_r, N_t, shadow_fading_margin_dB=8, channel='rayleigh'):
+    global np_random
+    
+    G = 1 # compute_large_scale_fading(d=100, f_c=900e6)
+
+    if channel == 'ricean':
+        return _create_ricean_channel(G, N_sc, N_r, N_t, K_factor=4, sigma_dB=shadow_fading_margin_dB)
+    
+    if channel == 'rayleigh':
+        return _create_ricean_channel(G, N_sc, N_r, N_t, K_factor=0, sigma_dB=shadow_fading_margin_dB)
+
+    if channel == 'CDL-C':
+        return _generate_cdl_c_channel(G, N_sc, N_r, N_t, sigma_dB=shadow_fading_margin_dB)
+    
+    if channel == 'CDL-E':
+        return _generate_cdl_e_channel(G, N_sc, N_r, N_t, sigma_dB=shadow_fading_margin_dB)
+    
+
+def _create_ricean_channel(G, N_sc, N_r, N_t, K_factor, sigma_dB):
+    global np_random
+  
+    G_fading = _dB(G) - np_random.normal(loc=0, scale=np.sqrt(sigma_dB), size=(N_r, N_t))
+    G_fading = np.array([_linear(g) for g in G_fading])
+    
+    mu = np.sqrt(K_factor / (1 + K_factor))
+    sigma = np.sqrt(1 / (1 + K_factor))
+
+    H = np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t)) + \
+        1j * np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t))
+    
+    # Normalize channel to unity gain and add large scale gain    
+    H /= np.trace(H)
+    H *= np.sqrt(G_fading / 2) # element multiplication.
+
+    H_full = np.repeat(H[np.newaxis, :, :], N_sc, axis=0)  # Repeat for all subcarriers
+
+    return H_full
+
+
+def _generate_cdl_c_channel(G, N_sc, N_r, N_t, sigma_dB):
+    global np_random
+
+    return H
+
+
+def _generate_cdl_e_channel(G, N_sc, N_r, N_t, sigma_dB):
+    global np_random
+
+
+    return H
+
+
+def compute_large_scale_fading(d, f_c, D_t_dB=12, D_r_dB=0, pl_exp=2):
+    l = c / f_c
+    G = _linear(D_t_dB * D_r_dB) * (l / (4 * np.pi * d)) ** pl_exp
+    
+    assert (G < 1)
+    
+    return G
 
 
 def _mse(H_true, H_estimated):
@@ -373,6 +506,10 @@ def _mse(H_true, H_estimated):
 
 def _dB(X):
     return 10 * np.log10(X)
+
+
+def _linear(X):
+    return 10 ** (X / 10.)
 
 
 def detect_symbols(x_sym_hat, alphabet, algorithm):
@@ -485,7 +622,7 @@ def compute_crc(x_bits_orig, crc_generator):
     return crc
 
 
-def compute_precoder_combiner(H, snr_dB):    
+def compute_precoder_combiner(H, snr_dB, algorithm='SVD_Waterfilling'):    
     U, S, Vh = _svd_precoder_combiner(H)
     
     try:
@@ -497,7 +634,7 @@ def compute_precoder_combiner(H, snr_dB):
         Dinv = np.eye(S.shape[0])
 
     F = np.conjugate(np.transpose(Vh, (0, 2, 1)))@D
-    Gcomb = Dinv @ np.conjugate(np.transpose(U, (0, 2, 1)))
+    Gcomb = Dinv@np.conjugate(np.transpose(U, (0, 2, 1)))
    
     return F, Gcomb
 
@@ -547,11 +684,11 @@ def _matrix_vector_multiplication(A, B):
     return ans
 
 
-def generate_plot(df, xlabel, ylabel, semilogy=True):
+def plot_performance(df, xlabel, ylabel, semilogy=True):
     cols = list(set([xlabel, ylabel, 'snr_dB']))
     df = df[cols]
     df_plot = df.groupby('snr_dB').mean().reset_index()
-    Tx_SNRs = sorted(df['snr_dB'].unique())
+    # xtick_labels = sorted(df[xlabel].unique())
     
     fig, ax = plt.subplots(figsize=(9,6))
     if semilogy:
@@ -561,29 +698,64 @@ def generate_plot(df, xlabel, ylabel, semilogy=True):
              markeredgecolor='k', markerfacecolor='r', markersize=6)
 
     plt.grid(which='both', axis='both')
-    plt.xticks(Tx_SNRs)
+    # plt.xlim([min(xtick_labels), max(xtick_labels)*1.0001])
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
     tikzplotlib.save(f'output_{ylabel}_vs_{xlabel}.tikz')
     plt.show()
     plt.close(fig)
+    
+    
+def plot_channel(channel, filename=None):
+    N_sc, N_r, N_t = channel.shape
+    
+    # Only plot first receive antenna
+    H = channel[:,0,:]
+    
+    # plt.rcParams['font.size'] = 36
+    # plt.rcParams['text.usetex'] = True
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    plt.imshow(np.abs(H) ** 2, aspect='auto')
+    
+    plt.xlabel('TX Antennas')
+    plt.ylabel('Subcarriers')
+    
+    plt.xticks(range(N_t))
+    
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig(f'channel_{filename}.pdf', format='pdf')
+    plt.show()
+    plt.close(fig)
 
     
-def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generator, N_sc, N_r, N_t, max_transmissions=1):
+def _print_divider():
+    print('-' * 125)
+    
+    
+def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generator, N_sc, N_r, N_t, max_transmissions=500):
     global np_random
     
     start_time = time.time()
+    
+    if max_transmissions < 500:
+        print('WARNING:  Low number of runs could cause statistically inaccurate results.')
+        
     alphabet = create_constellation(constellation=constellation, M=M_constellation)
-
+    k_constellation = int(np.log2(M_constellation))
+    
     X_information, X, [x_b_i, x_b_q] = generate_transmit_symbols(N_sc, N_t, alphabet=alphabet)
     bits_transmitter, codeword_transmitter = bits_from_IQ(x_b_i, x_b_q)
-    P_X = np.mean(_signal_power(X)) * 1e3 # in mW
+    P_X = np.mean(_signal_power(X))
 
-    P = generate_pilot_symbols(N_t, n_pilot)
-    H = create_channel(N_sc, N_r, N_t)
+    P = generate_pilot_symbols(N_t, n_pilot, kind='dft')
+    H = create_channel(N_sc, N_r, N_t, channel='rayleigh', shadow_fading_margin_dB=8)
+    
+    plot_channel(H)
 
-    df = pd.DataFrame(columns = ['snr_dB', 'snr_transmitter_dB', 
+    df = pd.DataFrame(columns = ['snr_dB', 'snr_transmitter_dB', 'EbN0_transmitter_dB', 
                                  'channel_estimation_error', 'PL_dB', 'snr_receiver_after_eq_dB', 
                                  'BER', 'BLER'])
     
@@ -594,30 +766,34 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         BER = []
         
         if item % 2 == 0:
-            print('-' * 100)
+            _print_divider()
 
         # Precoder and combiner
         # F, Gcomb = compute_precoder_combiner(H, snr_dB)
 
         for n_transmissions in range(max_transmissions):
             Y, noise = channel_effect(H, X, snr_dB)
-            T, _ = channel_effect(H[:n_pilot, :, :], P, snr_dB)
-            P_Y = np.mean(_signal_power(Y)) * 1e3 # in mW
+            T, _ = channel_effect(H[:P.shape[0], :], P, snr_dB)
+            P_Y = np.mean(_signal_power(Y))
+            
+            # Quantization is optional.
+            Y = quantize(Y, b=np.inf)            
             
             PL_dB = _dB(P_X) - _dB(P_Y)
             
-            P_noise = np.mean(_signal_power(noise)) * 1e3 # in mW
+            P_noise = np.mean(_signal_power(noise))
     
             snr_transmitter_dB = _dB(P_X/P_noise) # This should be very close to snr_dB.
-    
+            EbN0_transmitter_dB = snr_transmitter_dB - _dB(k_constellation)
+            
             # Estimate from pilots
             H_est = H if MIMO_estimation == 'perfect' else estimate_channel(P, T, snr_dB, algorithm=MIMO_estimation)
             estimation_error = _mse(H, H_est)
             
             W = equalize_channel(H_est, snr_dB, algorithm=MIMO_equalization)
             
+            # Note:  Often, keep an eye on the product W@H and see how close it is to I.            
             X_hat = _matrix_vector_multiplication(W, Y)
-            assert(X_hat.shape == Y.shape)
             v =  _matrix_vector_multiplication(W, noise)
             
             P_X_hat = np.mean(_signal_power(X_hat))
@@ -644,16 +820,29 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         BER = np.mean(BER)
         BLER = block_error / max_transmissions
 
-        to_append = [snr_dB, snr_transmitter_dB, estimation_error, PL_dB, snr_receiver_after_eq_dB, BER, BLER]
-        df = pd.concat([df, pd.DataFrame([to_append], columns=df.columns)], ignore_index=True, axis=0)
+        to_append = [snr_dB, snr_transmitter_dB, EbN0_transmitter_dB, estimation_error, PL_dB, snr_receiver_after_eq_dB, BER, BLER]
+        df_to_append = pd.DataFrame([to_append], columns=df.columns)
         
-        print(' | '.join(map(str, to_append)))
+        rounded = [f'{x:.3f}' for x in to_append]
+        del to_append
+        
+        if df.shape[0] == 0:
+            df = df_to_append.copy()
+        else:
+            df = pd.concat([df, df_to_append], ignore_index=True, axis=0)
+        
+        print(' | '.join(map(str, rounded)))
     
     end_time = time.time()
-    print(f'Time elapsed: {((end_time - start_time)):.2f} seconds.')
+    
+    _print_divider()
+    print(f'Time elapsed: {((end_time - start_time) / 60.):.2f} mins.')
     
     return df
-    
-df_results = run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generator, N_sc, N_r, N_t, max_transmissions=100)
-generate_plot(df_results, xlabel='snr_dB', ylabel='BER', semilogy=True)
-generate_plot(df_results, xlabel='snr_dB', ylabel='BLER', semilogy=True)
+
+df_results = run_simulation(transmit_SNR_dB, constellation, M_constellation,
+                            crc_generator, N_sc, N_r, N_t,
+                            max_transmissions=500)
+
+plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BER', semilogy=True)
+plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BLER', semilogy=True)
