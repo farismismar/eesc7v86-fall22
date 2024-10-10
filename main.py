@@ -13,7 +13,6 @@ from scipy.constants import c
 import time
 
 import matplotlib.pyplot as plt
-import tikzplotlib
 
 from sklearn.cluster import KMeans
 
@@ -689,7 +688,6 @@ def compute_bit_error_rate(a, b):
 
 def compute_crc(x_bits_orig, crc_generator):
     # Introduce CRC to x
-    
     length_crc = len(bin(crc_generator)[2:])
         
     x_bits = x_bits_orig.zfill(length_crc)
@@ -776,37 +774,6 @@ def _waterfilling(S, power):
     return power_alloc
 
 
-
-    # # Ensure the eigenvalues S are positive and non-zero
-    # S = np.diag(S) + 1e-6 # This small quantity is to avoid a divide by 0 eigenvalues.
-    # # S = np.maximum(S, 1e-6)  # Prevent division by zero for small eigenvalues
-    
-    # n_modes = len(S)
-    # P = np.zeros(n_modes)  # Initialize power allocation array
-    
-    # # Bisection method to find the optimal water level
-    # lower_bound = 0
-    # upper_bound = power + np.max(1 / S)  # Initial bounds for water level
-    
-    # tolerance = 1e-6  # Precision for bisection convergence
-    # while upper_bound - lower_bound > tolerance:
-    #     mu = (upper_bound + lower_bound) / 2.0
-        
-    #     # Waterfilling formula: allocate power where mu > 1/S
-    #     P = np.maximum(0, mu - 1 / S)
-        
-    #     total_power = np.sum(P)  # Total power allocated
-        
-    #     if total_power > power:
-    #         upper_bound = mu  # Decrease water level
-    #     else:
-    #         lower_bound = mu  # Increase water level
-    
-    # # Return the final power allocation across the eigenmodes
-    # # Note that np.trace(P) is equal to power.
-    # return P
-
-
 def _matrix_vector_multiplication(A, B):
     N_sc = A.shape[0]
 
@@ -835,7 +802,6 @@ def plot_performance(df, xlabel, ylabel, semilogy=True):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
-    tikzplotlib.save(f'output_{ylabel}_vs_{xlabel}.tikz')
     plt.show()
     plt.close(fig)
     
@@ -1013,7 +979,7 @@ df_results, df_detailed_results = run_simulation(transmit_SNR_dB,
                                                  constellation, 
                                                  M_constellation, crc_generator,
                                                  N_sc, N_r, N_t, 
-                                                 max_transmissions=100)
+                                                 max_transmissions=500)
 
 plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BER', semilogy=True)
 plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BLER', semilogy=True)
