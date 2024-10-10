@@ -10,7 +10,9 @@ Channel equalization is performed through the choices of zero forcing and MMSE e
 
 Symbol detection is performed through two different algorithm: 1) maximum likelihood and 2) unsupervised learning.
 
-Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), bit error rate, pathloss, and block error rate.
+Symbol quantization through Lloyd-Max is also implemented.
+
+Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), TX Eb/N0, bit error rate, pathloss, and block error rate.
 
 The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
@@ -31,4 +33,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | 0.3      | 2024-01-03 | Major revision and error fixes. |
 | 0.4      | 2024-01-13 | More features. |
 | 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
-| 0.6      | 2024-10-09 | Simplified implementation. |
+| 0.6      | 2024-10-10 | Simplified implementation and more features. |
