@@ -13,6 +13,7 @@ from scipy.constants import c
 import time
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from sklearn.cluster import KMeans
 
@@ -195,6 +196,26 @@ def generate_transmit_symbols(N_sc, N_t, alphabet, P_TX):
     return x_information, x_symbols, [x_b_i, x_b_q]
 
 
+def generate_interference(Y, p_interference, interference_power_dBm):
+    global np_random
+   
+    N_sc, N_r = Y.shape
+    
+    interference_power = _linear(interference_power_dBm)
+    
+    interf = np.sqrt(interference_power / 2) * \
+        (np_random.normal(0, 1, size=(N_sc, N_r)) + \
+         1j * np_random.normal(0, 1, size=(N_sc, N_r)))
+    
+    mask = np_random.binomial(n=1, p=p_interference, size=N_sc)
+        
+    # Apply some changes to interference
+    for idx in range(N_sc):
+        interf[idx, :] *= mask[idx]
+    
+    return interf
+
+
 def generate_pilot_symbols(N_t, n_pilot, P_TX, kind='dft'):
     global np_random
     
@@ -268,6 +289,7 @@ def bits_to_baseband(x_bits, alphabet):
     
     x_sym = []
     x_info = []
+    
     # Next is baseband which is the complex valued symbols
     for i, q in zip(x_b_i, x_b_q):
         sym = alphabet.loc[(alphabet['I'] == i) & (alphabet['Q'] == q), 'x'].values[0]
@@ -326,11 +348,11 @@ def _equalize_channel_ZF(H):
     # (H^H * H) for all subcarriers: (N_sc, N_t, N_t)
     H_herm_H = np.matmul(H_hermitian, H)
     
-    # Compute the pseudo-inverse for each subcarrier (to handle singularity): (N_sc, N_t, N_t)
-    H_pseudo_inv = np.linalg.pinv(H_herm_H)
+    # Compute the pseudo-inverse for each subcarrier (to handle singularity)
+    H_pseudo_inv = np.linalg.pinv(H_herm_H) # Shape (N_sc, N_t, N_t)
     
     # ZF equalization matrix: (H^H * H)^-1 * H^H for all subcarriers
-    W_zf = np.matmul(H_pseudo_inv, H_hermitian)  # Shape: (N_sc, N_t, N_r)
+    W_zf = np.matmul(H_pseudo_inv, H_hermitian)  # Shape (N_sc, N_t, N_r)
     
     return W_zf
     
@@ -345,12 +367,12 @@ def _equalize_channel_MMSE(H, snr_dB):
     # (H^H * H) for all subcarriers: (N_sc, N_t, N_t)
     H_herm_H = np.matmul(H_hermitian, H)
     
-    # Add noise power to diagonal (1/SNR * I): (N_sc, N_t, N_t)
-    identity = np.eye(N_t)[None, :, :]  # Shape (1, N_t, N_t) -> Broadcast to (N_sc, N_t, N_t)
-    H_mmse_term = H_herm_H + (1 / snr_linear) * identity
+    # Add noise power to diagonal (1/SNR * I)
+    identity = np.eye(N_t)[None, :, :]
+    H_mmse_term = H_herm_H + (1 / snr_linear) * identity # Shape (N_sc, N_t, N_t)
     
-    # Compute the inverse of (H^H * H + (1/SNR) * I) for all subcarriers: (N_sc, N_t, N_t)
-    H_mmse_inv = np.linalg.inv(H_mmse_term)
+    # Compute the inverse of (H^H * H + (1/SNR) * I) for all subcarriers
+    H_mmse_inv = np.linalg.inv(H_mmse_term) # Shape: (N_sc, N_t, N_t)
     
     # MMSE equalization matrix: (H^H * H + (1/SNR) * I)^-1 * H^H
     W_mmse = np.matmul(H_mmse_inv, H_hermitian)  # Shape: (N_sc, N_t, N_r)
@@ -379,7 +401,7 @@ def _estimate_channel_LMMSE(X, Y, snr_dB):
     N_sc = H_ls.shape[0]  # Number of subcarriers
     
     # Initialize the LMMSE channel estimate
-    H_lmmse = np.zeros_like(H_ls, dtype=np.complex64)
+    H_lmmse = np.zeros_like(H_ls, dtype=np.complex128)
     
     # Iterate over each subcarrier
     for sc in range(N_sc):
@@ -790,7 +812,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     df_plot = df.groupby('snr_dB').mean().reset_index()
     # xtick_labels = sorted(df[xlabel].unique())
     
-    fig, ax = plt.subplots(figsize=(9,6))
+    fig, ax = plt.subplots(figsize=(9, 6))
     if semilogy:
         ax.set_yscale('log')
     ax.tick_params(axis=u'both', which=u'both')
@@ -804,6 +826,55 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(f'performance_{ylabel}_{filename}.pdf', format='pdf', dpi=fig.dpi)
+    plt.show()
+    plt.close(fig)
+    
+
+def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
+    X_re = np.real(X)
+    X_im = np.imag(X)
+    
+    if text is None:
+        text = ''
+    else:
+        text = f' - {text}'
+        
+    is_complex = True
+    if np.sum(X_im) == 0:
+        is_complex = False
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    if algorithm == 'empirical':
+     #   pdb.set_trace()
+        for label, var in zip(['Re[X]', 'Im[X]'], [X_re, X_im]):
+            # Is this a real quantity?
+            if not is_complex and label == 'Im[X]':                
+                continue
+            counts, bin_edges = np.histogram(var, bins=num_bins, density=True)
+            pdf = counts / counts.sum()        
+            bin_edges = np.insert(bin_edges, 0, bin_edges[0] - (bin_edges[2] - bin_edges[1]))
+            ax.plot(bin_edges[2:], pdf, '-', linewidth=1.5, label=f'{label}{text}')
+        ax.legend()
+    
+    if algorithm == 'KDE':
+        df_re = pd.DataFrame(X_re).add_suffix(f'_Re{text}')
+        df_im = pd.DataFrame(X_im).add_suffix(f'_Im{text}')
+        
+        df = df_re.copy()
+        if is_complex:
+            df = pd.concat([df, df_im], axis=1, ignore_index=False)
+            
+        sns.kdeplot(data=df, ax=ax, cumulative=False,
+                    common_norm=True, common_grid=True)
+    
+    plt.grid(True)
+    plt.xlabel('X')
+    plt.ylabel('p(X)')
+    
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig(f'pdf_{algorithm}_{filename}.pdf', format='pdf', dpi=fig.dpi)
     plt.show()
     plt.close(fig)
     
@@ -831,6 +902,25 @@ def plot_channel(channel, filename=None):
     plt.show()
     plt.close(fig)
 
+
+def plot_IQ(signal, filename=None):
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    
+    for idx in range(signal.shape[1]):
+        X = signal[:, idx]
+        plt.scatter(np.real(X), np.imag(X), marker='o', lw=2, label=f'TX ant. {idx}')
+        
+    plt.grid(True)
+    plt.legend()
+    plt.xlabel('I')
+    plt.ylabel('Q')
+
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig(f'IQ_{filename}.pdf', format='pdf', dpi=fig.dpi)
+    plt.show()
+    plt.close(fig)
+
     
 def _print_divider():
     print('-' * 125)
@@ -840,10 +930,14 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     global np_random
     global P_BS
     
-    P_TX = P_BS / N_t
-    precoder = 'identity'
-    channel_type = 'CDL-E'
-    quantization_b = np.inf
+    P_TX = P_BS / N_t                # This is the power of one OFDM symbol (across all subcarriers)
+    
+    precoder = 'identity'            # Also, SVD_Waterfilling
+    channel_type = 'CDL-E'           # Channel type
+    quantization_b = 4               # Quantization resolution
+    
+    interference_power_dBm = -105    # dBm measured at the receiver
+    p_interference = 0.00            # probability of interference
     
     start_time = time.time()
     
@@ -862,9 +956,9 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     plot_channel(H, filename=channel_type)
 
-    df = pd.DataFrame(columns=['snr_dB', 'n', 'snr_transmitter_dB', 
-                               'EbN0_transmitter_dB', 'channel_estimation_error', 
-                               'PL_dB', 'snr_receiver_after_eq_dB',
+    df = pd.DataFrame(columns=['snr_dB', 'n', 'EbN0_dB', 'snr_transmitter_dB', 
+                               'channel_estimation_error', 
+                               'PL_dB', 'sinr_receiver_after_eq_dB',
                                'BER', 'BLER'])
     
     df_detailed = df.copy().rename({'BLER': 'total_block_errors'}, axis=1)
@@ -885,33 +979,40 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         # Left-multiply x with F to obtain X tilde        
         X = _matrix_vector_multiplication(F, X)
         P_X = np.mean(_signal_power(X)) # after precoding
-                
+        
+        EbN0_dB = snr_dB - _dB(k_constellation)
+
         for n_transmission in range(max_transmissions):
             Y, noise = channel_effect(H, X, snr_dB)
             T, _ = channel_effect(H[:P.shape[0], :], P, snr_dB)
             
+            # Interference
+            interference = generate_interference(Y, p_interference, interference_power_dBm)
+            Y += interference            
+            
             # Left-multiply y and noise with Gcomb            
             Y = _matrix_vector_multiplication(Gcomb, Y)
             noise = _matrix_vector_multiplication(Gcomb, noise)
-                    
+            
             P_Y = np.mean(_signal_power(Y))
             P_noise = np.mean(_signal_power(noise))
         
             # Quantization is optional.
             Y = quantize(Y, b=quantization_b)
+            
             P_Y = np.mean(_signal_power(Y))
             
             PL_dB = _dB(P_X) - _dB(P_Y)
         
             snr_transmitter_dB = _dB(P_X/P_noise) # This should be very close to snr_dB.
-            EbN0_transmitter_dB = snr_transmitter_dB - _dB(k_constellation)
+            # EbN0_transmitter_dB = snr_transmitter_dB - _dB(k_constellation)
             
             # Estimate from pilots
             H_est = H if MIMO_estimation == 'perfect' else estimate_channel(P, T, snr_dB, algorithm=MIMO_estimation)
             estimation_error = _mse(H, H_est)
             
-            # Replace the channel H with Sigma as a result of multiplying X and Y
-            # above.
+            # Replace the channel H with Sigma as a result of the operations on
+            # X and Y above.
             GH_estF = Gcomb@H_est@F # This is Sigma.  Is it diagonalized? 
             if (precoder == 'SVD_Waterfilling'):
                 assert np.allclose(GH_estF[0], np.diag(np.diagonal(GH_estF[0])))
@@ -923,12 +1024,14 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
                 print("WARNING")
             
             X_hat = _matrix_vector_multiplication(W, Y)
-            v =  _matrix_vector_multiplication(W, noise)
+            v = _matrix_vector_multiplication(W, noise)
+            q = _matrix_vector_multiplication(W, interference)
             
             P_X_hat = np.mean(_signal_power(X_hat))
             P_v = np.mean(_signal_power(v))
+            P_q = np.mean(_signal_power(q))
             
-            snr_receiver_after_eq_dB = _dB(P_X_hat/P_v)
+            sinr_receiver_after_eq_dB = _dB(P_X_hat/(P_v + P_q))
             
             # Now conduct symbol detection
             X_hat_information, X_hat, [x_hat_b_i, x_hat_b_q] = detect_symbols(X_hat, alphabet, algorithm=symbol_detection)
@@ -943,10 +1046,10 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             if int(crc_transmitter, 2) ^ int(crc_receiver, 2) != 0:
                 block_error += 1
             
-            BER_i = compute_bit_error_rate(codeword_transmitter, codeword_receiver) 
+            BER_i = compute_bit_error_rate(codeword_transmitter, codeword_receiver)
             BER.append(BER_i)
             
-            to_append_i = [snr_dB, n_transmission, snr_transmitter_dB, EbN0_transmitter_dB, estimation_error, PL_dB, snr_receiver_after_eq_dB, BER_i, block_error]
+            to_append_i = [snr_dB, n_transmission, EbN0_dB, snr_transmitter_dB, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER_i, block_error]
             df_to_append_i = pd.DataFrame([to_append_i], columns=df_detailed.columns)
             
             if df_detailed.shape[0] == 0:
@@ -957,7 +1060,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         BER = np.mean(BER)
         BLER = block_error / max_transmissions
 
-        to_append = [snr_dB, snr_transmitter_dB, EbN0_transmitter_dB, estimation_error, PL_dB, snr_receiver_after_eq_dB, BER, BLER]
+        to_append = [snr_dB, EbN0_dB, snr_transmitter_dB, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER, BLER]
         df_to_append = pd.DataFrame([to_append], columns=df.columns)
         
         rounded = [f'{x:.3f}' for x in to_append]
@@ -972,6 +1075,18 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     end_time = time.time()
     
+    # Plots            
+    # Plot the noise pdf of the last run
+    plot_pdf(noise, text='noise', algorithm='KDE')    
+    
+    # Plot a quantized signal of the last run
+    plot_IQ(Y)
+    
+    # Plot the SNR distribution
+    plot_pdf(df_detailed['sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=15, 
+             algorithm='empirical')
+    ###########################################################################
+    
     _print_divider()
     print(f'Time elapsed: {((end_time - start_time) / 60.):.2f} mins.')
     
@@ -983,5 +1098,5 @@ df_results, df_detailed_results = run_simulation(transmit_SNR_dB,
                                                  N_sc, N_r, N_t, 
                                                  max_transmissions=500)
 
-plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BER', semilogy=True, filename='BER')
-plot_performance(df_results, xlabel='snr_transmitter_dB', ylabel='BLER', semilogy=True, filename='BLER')
+plot_performance(df_results, xlabel='EbN0_dB', ylabel='BER', semilogy=True, filename='BER')
+plot_performance(df_results, xlabel='EbN0_dB', ylabel='BLER', semilogy=True, filename='BLER')
