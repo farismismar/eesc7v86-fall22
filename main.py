@@ -43,7 +43,7 @@ N_r = 4                                  # Number of receive antennas per user
 N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power in Watts (across all transmitters)
 
-transmit_SNR_dB = [0, 5, 10, 15, 20, 25, 30][::-1]  # Transmit SNR in dB  # Transmit SNR in dB
+transmit_SNR_dB = [30][::-1]  # Transmit SNR in dB  # Transmit SNR in dB
 
 constellation = 'QAM'
 M_constellation = 16
@@ -848,7 +848,6 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
     fig, ax = plt.subplots(figsize=(12, 6))
     
     if algorithm == 'empirical':
-     #   pdb.set_trace()
         for label, var in zip(['Re[X]', 'Im[X]'], [X_re, X_im]):
             # Is this a real quantity?
             if not is_complex and label == 'Im[X]':                
@@ -866,9 +865,7 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
         df = df_re.copy()
         if is_complex:
             df = pd.concat([df, df_im], axis=1, ignore_index=False)
-            
-        sns.kdeplot(data=df, ax=ax, cumulative=False,
-                    common_norm=True, common_grid=True)
+            df.plot(kind='kde', bw_method=0.3, ax=ax)
     
     plt.grid(True)
     plt.xlabel('X')
@@ -1077,9 +1074,9 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     end_time = time.time()
     
-    # Plots            
+    # Plots
     # Plot the noise pdf of the last run
-    plot_pdf(noise, text='noise', algorithm='KDE')    
+    plot_pdf(noise, text='noise', algorithm='KDE')
     
     # Plot a quantized signal of the last run
     plot_IQ(Y)
