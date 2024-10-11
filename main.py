@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Sep 18 15:41:51 2024
+Created on Sat Oct 5 17:18:31 2024
 
 @author: farismismar
 """
@@ -17,7 +17,6 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 
 import os
-
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
 # # For Windows users
@@ -41,13 +40,13 @@ N_r = 4                                  # Number of receive antennas per user
 N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power [W] (across all transmitters)
     
-max_transmissions = 100
-precoder = 'identity'                    # Also: identity, SVD, SVD_Waterfilling, beamforming
+max_transmissions = 500
+precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
 channel_type = 'CDL-E'                   # Channel type: rayleigh, ricean, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
 
 Df = 15e3                                # OFDM subcarrier bandwidth [Hz].
-f_c = 600e6                              # Center frequency [MHz] for large scale fading and DFT.
+f_c = 1800e6                             # Center frequency [MHz] for large scale fading and DFT.
 interference_power_dBm = -105            # dBm measured at the receiver
 p_interference = 0.00                    # probability of interference
 
@@ -316,10 +315,18 @@ def bits_to_baseband(x_bits, alphabet):
 
 def channel_effect(H, X, snr_dB):
     global np_random
+        
+    N_sc = H.shape[0]
+    
+    # Set a flag to deal with beamforming.
+    is_beamforming = True
+    N_r = 1
     
     # Parameters
-    N_sc, N_r, N_t = H.shape
-
+    if len(H.shape) == 3:  # MIMO case
+        _, N_r, N_t = H.shape
+        is_beamforming = False
+    
     # Convert SNR from dB to linear scale
     snr_linear = _linear(snr_dB)
 
@@ -333,9 +340,14 @@ def channel_effect(H, X, snr_dB):
     noise = np.sqrt(noise_power / 2) * (np_random.randn(N_sc, N_r) + 1j * np_random.randn(N_sc, N_r))
     
     received_signal = np.zeros((N_sc, N_r), dtype=np.complex128)
-    for sc in range(N_sc):
-        received_signal[sc, :] = H[sc, :, :] @ X[sc, :] + noise[sc, :]
     
+    if is_beamforming:
+        received_signal = H*X + noise
+        return received_signal, noise
+    
+    for sc in range(N_sc):        
+            received_signal[sc, :] = H[sc, :, :] @ X[sc, :] + noise[sc, :]
+
     return received_signal, noise
 
 
@@ -745,7 +757,7 @@ def compute_crc(x_bits_orig, crc_generator):
 
 def compute_precoder_combiner(H, P_TX, algorithm='SVD_Waterfilling'):
     N_sc, N_r, N_t = H.shape
-    N_s = min(N_r, N_t)
+    N_s = min(N_r, N_t)    
     
     if algorithm == 'identity':
         F = np.eye(N_t, N_s)
@@ -757,11 +769,18 @@ def compute_precoder_combiner(H, P_TX, algorithm='SVD_Waterfilling'):
     if algorithm == 'dft_beamforming':
         if N_r != 1:
             raise ValueError("Channel must have a single receive antenna.")            
-            F = _dft_codebook(N_t)            
-            sinr_argmax = np.argmax(np.abs(F@H) ** 2) # Now find the SINR optimal vector in F
-            f_opt = F[sinr_argmax, :]
-            Gcomb = 1.
-            return f_opt, Gcomb
+        F = _dft_codebook(N_t)
+        
+        # Search for the optimal beamformer
+        max_sinr = -np.inf
+        for idx in range(N_t):
+            sinr = np.abs(np.vdot(H[0, :, :], F[idx, :])) ** 2
+            if sinr > max_sinr:
+                max_sinr = sinr
+                f_opt = F[idx, :] # extract a vector
+                
+        Gcomb = np.ones((N_sc, 1))
+        return f_opt, Gcomb
 
     if algorithm == 'SVD':
         U, S, Vh = _svd_precoder_combiner(H)
@@ -858,14 +877,17 @@ def _waterfilling(S, power):
 
 
 def _matrix_vector_multiplication(A, B):
-    N_sc = A.shape[0]
-
-    ans = np.zeros((N_sc, A.shape[1]), dtype=np.complex128)
-    for n in range(N_sc):
-        ans[n, :] = A[n, :]@B[n]
-        
-    return ans
-
+    try:
+        N_sc = A.shape[0]
+    
+        ans = np.zeros((N_sc, A.shape[1]), dtype=np.complex128)
+        for n in range(N_sc):
+            ans[n, :] = A[n, :]@B[n]
+        return ans
+    except:
+        # This is likely due to beamforming.
+        return A@B    
+    
 
 def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     cols = list(set([xlabel, ylabel, 'snr_dB']))
@@ -990,9 +1012,10 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     global precoder, channel_type, quantization_b, Df, max_transmissions
     global p_interference, interference_power_dBm
     
-    P_TX = P_BS / N_t                # This is the power of one OFDM symbol (across all subcarriers)
-    
     start_time = time.time()
+    
+    P_TX = P_BS / N_t                # This is the power of one OFDM symbol (across all subcarriers)
+    N_s = min(N_r, N_t)              # Number of streams.
     
     if max_transmissions < 300:
         print('WARNING:  Low number of runs could cause statistically inaccurate results.')
@@ -1000,16 +1023,24 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     alphabet = create_constellation(constellation=constellation, M=M_constellation)
     k_constellation = int(np.log2(M_constellation))
     
-    X_information, X, [x_b_i, x_b_q], payload_size = generate_transmit_symbols(N_sc, N_t, alphabet=alphabet, P_TX=P_TX)
+    X_information, X, [x_b_i, x_b_q], payload_size = generate_transmit_symbols(N_sc, N_s, alphabet=alphabet, P_TX=P_TX)
     bits_transmitter, codeword_transmitter = bits_from_IQ(x_b_i, x_b_q)
     P_X = np.mean(_signal_power(X)) * Df
 
     P = generate_pilot_symbols(N_t, n_pilot, P_TX, kind='dft')
     H = create_channel(N_sc, N_r, N_t, channel=channel_type, shadow_fading_margin_dB=8)
+
+    # Precoder and combiner
+    F, Gcomb = compute_precoder_combiner(H, P_BS, algorithm=precoder)
+     
+    # Precoding right-multiply H with F
+    HF = H@F
     
     # The throughput can be computed by dividing the payload size by TTI.
     print(f'Payload to be transmitted: {payload_size} bits per TTI.')
-    print('Channel eigenmodes are: {}'.format(_find_channel_eigenmodes(H)))
+    
+    if precoder != 'dft_beamforming':
+        print('Channel eigenmodes are: {}'.format(_find_channel_eigenmodes(H)))
     
     plot_channel(H, filename=channel_type)
 
@@ -1030,21 +1061,15 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         if item % 2 == 0:
             _print_divider()
 
-        # Precoder and combiner
-        F, Gcomb = compute_precoder_combiner(H, P_BS, algorithm=precoder)
-        
-        # Precoding right-multiply H with F
-        HF = H@F
-        
         EbN0_dB = snr_dB - _dB(k_constellation)
-
+        
         for n_transmission in range(max_transmissions):
             Y, noise = channel_effect(HF, X, snr_dB)
             T, _ = channel_effect(HF[:P.shape[0], :], P, snr_dB)
             
             # Interference
             interference = generate_interference(Y, p_interference, interference_power_dBm)
-            Y += interference            
+            Y += interference
             
             # Left-multiply y and noise with Gcomb            
             Y = _matrix_vector_multiplication(Gcomb, Y)
@@ -1068,13 +1093,16 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             estimation_error = _mse(H, H_est)
             
             # Replace the channel H with Sigma as a result of the operations on
-            # X and Y above.
+            # X and Y above.            
             GH_estF = Gcomb@H_est@F # This is Sigma.  Is it diagonalized with elements equal the sqrt of eigenmodes?  Yes.
 
             if (precoder == 'SVD'):
                 assert np.allclose(GH_estF[0], np.diag(np.diagonal(GH_estF[0])))
             
-            W = equalize_channel(GH_estF, snr_dB, algorithm=MIMO_equalization)
+            if precoder != 'dft_beamforming':
+                W = equalize_channel(GH_estF, snr_dB, algorithm=MIMO_equalization)
+            else:
+                W = np.ones((N_t, N_sc)) # no equalization necessary for beamforming.
             
             # # Note:  Often, keep an eye on the product (W@GH_estF).round(1) and see how close it is to I.           
             # if not np.allclose((W@GH_estF)[0].round(1), np.eye(N_t)):
@@ -1103,7 +1131,11 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             if int(crc_transmitter, 2) ^ int(crc_receiver, 2) != 0:
                 block_error += 1
             
-            BER_i = compute_bit_error_rate(codeword_transmitter, codeword_receiver)
+            # For beamforming, the codeword is actually one symbol, and thus
+            # bit error rate will be filled with NaN
+            BER_i = np.nan
+            if precoder != 'dft_beamforming':
+                BER_i = compute_bit_error_rate(codeword_transmitter, codeword_receiver)
             BER.append(BER_i)
             
             to_append_i = [snr_dB, n_transmission, EbN0_dB, snr_transmitter_dB, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER_i, block_error]
