@@ -2,6 +2,8 @@
 
 This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel and both QAM and QPSK symbols (Gray coded).  The simulation is for a single OFDM symbol and a single user.
 
+MIMO precoding is done via singular value decomposition (SVD), waterfilling, and identity.  Beamforming through the use of discrete Fourier transform (DFT) codebook is implemented.
+
 Several channel operations are performed: channel estimation, channel equalization, and symbol detection.
 
 Channel estimation is performed through the use of least squares estimation and the linear minimum mean square error (LMMSE) formula.
@@ -33,4 +35,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | 0.3      | 2024-01-03 | Major revision and error fixes. |
 | 0.4      | 2024-01-13 | More features. |
 | 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
-| 0.6      | 2024-10-10 | Simplified implementation and more features. |
+| 0.6      | 2024-10-11 | Simplified implementation and more features. |
