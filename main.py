@@ -1045,7 +1045,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     plot_channel(H, filename=channel_type)
 
     df = pd.DataFrame(columns=['snr_dB', 'n', 'EbN0_dB', 'snr_transmitter_dB', 
-                               'channel_estimation_error', 
+                               'code_rate_transmitter', 'channel_estimation_error', 
                                'PL_dB', 'sinr_receiver_after_eq_dB',
                                'BER', 'BLER'])
     
@@ -1062,6 +1062,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             _print_divider()
 
         EbN0_dB = snr_dB - _dB(k_constellation)
+        code_rate_transmitter = np.log2(1 + _linear(snr_dB)) / k_constellation
         
         for n_transmission in range(max_transmissions):
             Y, noise = channel_effect(HF, X, snr_dB)
@@ -1138,7 +1139,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
                 BER_i = compute_bit_error_rate(codeword_transmitter, codeword_receiver)
             BER.append(BER_i)
             
-            to_append_i = [snr_dB, n_transmission, EbN0_dB, snr_transmitter_dB, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER_i, block_error]
+            to_append_i = [snr_dB, n_transmission, EbN0_dB, snr_transmitter_dB, code_rate_transmitter, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER_i, block_error]
             df_to_append_i = pd.DataFrame([to_append_i], columns=df_detailed.columns)
             
             if df_detailed.shape[0] == 0:
@@ -1150,7 +1151,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         BER = np.mean(BER)
         BLER = block_error / max_transmissions
 
-        to_append = [snr_dB, EbN0_dB, snr_transmitter_dB, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER, BLER]
+        to_append = [snr_dB, EbN0_dB, snr_transmitter_dB, code_rate_transmitter, estimation_error, PL_dB, sinr_receiver_after_eq_dB, BER, BLER]
         df_to_append = pd.DataFrame([to_append], columns=df.columns)
         
         rounded = [f'{x:.3f}' for x in to_append]
