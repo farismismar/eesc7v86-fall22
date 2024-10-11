@@ -725,7 +725,9 @@ def compute_crc(x_bits_orig, crc_generator):
     return crc
 
 
-def compute_precoder_combiner(H, P_TX, algorithm='SVD_Waterfilling'):    
+def compute_precoder_combiner(H, P_TX, algorithm='SVD_Waterfilling'):
+    # print("Channel eigenmodes: {}".format(_find_channel_eigenmodes(H)))
+    
     N_sc, N_r, N_t = H.shape
     N_s = min(N_r, N_t)
     
@@ -740,9 +742,8 @@ def compute_precoder_combiner(H, P_TX, algorithm='SVD_Waterfilling'):
         U, S, Vh = _svd_precoder_combiner(H)
         
         try:
-            D = _waterfilling(S[0], P_TX)
-            pdb.set_trace()
-            Dinv = np.linalg.inv(D)      
+            D = _waterfilling(S[0, :], P_TX)
+            Dinv = np.linalg.inv(D)
         except Exception as e:
             print(f'Waterfilling failed due to {e}.  Returning identity.')
             D = np.eye(S.shape[1])
@@ -791,9 +792,11 @@ def _waterfilling(S, power):
         else:
             lower_bound = water_level  # Increase water level
     
+    P = np.diag(power_alloc)
+    
     # Return the final power allocation across the eigenmodes    
     # Note that np.trace(P) is equal to power.
-    return power_alloc
+    return P
 
 
 def _matrix_vector_multiplication(A, B):
@@ -801,7 +804,7 @@ def _matrix_vector_multiplication(A, B):
 
     ans = np.zeros((N_sc, A.shape[1]), dtype=np.complex128)
     for n in range(N_sc):
-        ans[n, :] = A[n, :] @ B[n]
+        ans[n, :] = A[n, :]@B[n]
         
     return ans
 
@@ -810,8 +813,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     cols = list(set([xlabel, ylabel, 'snr_dB']))
     df = df[cols]
     df_plot = df.groupby('snr_dB').mean().reset_index()
-    # xtick_labels = sorted(df[xlabel].unique())
-    
+        
     fig, ax = plt.subplots(figsize=(9, 6))
     if semilogy:
         ax.set_yscale('log')
@@ -820,7 +822,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
              markeredgecolor='k', markerfacecolor='r', markersize=6)
 
     plt.grid(which='both', axis='both')
-    # plt.xlim([min(xtick_labels), max(xtick_labels)*1.0001])
+    
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
@@ -932,9 +934,9 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     P_TX = P_BS / N_t                # This is the power of one OFDM symbol (across all subcarriers)
     
-    precoder = 'identity'            # Also, SVD_Waterfilling
+    precoder = 'SVD_Waterfilling'    # Also: identity, SVD_Waterfilling
     channel_type = 'CDL-E'           # Channel type
-    quantization_b = 4               # Quantization resolution
+    quantization_b = 8               # Quantization resolution
     
     interference_power_dBm = -105    # dBm measured at the receiver
     p_interference = 0.00            # probability of interference
