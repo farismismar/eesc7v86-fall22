@@ -931,7 +931,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     P_TX = P_BS / N_t                # This is the power of one OFDM symbol (across all subcarriers)
     
-    precoder = 'SVD_Waterfilling'    # Also: identity, SVD_Waterfilling
+    precoder = 'identity'            # Also: identity, SVD_Waterfilling
     channel_type = 'CDL-E'           # Channel type
     quantization_b = 8               # Quantization resolution
     
