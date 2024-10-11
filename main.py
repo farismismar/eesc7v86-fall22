@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 
 from sklearn.cluster import KMeans
 
+import pdb
+
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -838,7 +840,7 @@ def _find_channel_eigenmodes(H, subcarrier_idx=0):
 
 
 def _svd_precoder_combiner(H):
-    U, S, Vh = np.linalg.svd(H, full_matrices=True, hermitian=True)
+    U, S, Vh = np.linalg.svd(H, full_matrices=True) #, hermitian=True)
     return U, S, Vh
 
 
@@ -1096,7 +1098,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             # X and Y above.            
             GH_estF = Gcomb@H_est@F # This is Sigma.  Is it diagonalized with elements equal the sqrt of eigenmodes?  Yes.
 
-            if (precoder == 'SVD'):
+            if (precoder == 'SVD') or (precoder == 'SVD_Waterfilling'):
                 assert np.allclose(GH_estF[0], np.diag(np.diagonal(GH_estF[0])))
             
             if precoder != 'dft_beamforming':
