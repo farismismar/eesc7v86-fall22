@@ -13,11 +13,8 @@ from scipy.constants import c
 import time
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 from sklearn.cluster import KMeans
-
-import pdb
 
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -43,7 +40,7 @@ N_r = 4                                  # Number of receive antennas per user
 N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power in Watts (across all transmitters)
 
-transmit_SNR_dB = [30][::-1]  # Transmit SNR in dB  # Transmit SNR in dB
+transmit_SNR_dB = [0, 5, 10, 15, 20, 25, 30][::-1]  # Transmit SNR in dB  # Transmit SNR in dB
 
 constellation = 'QAM'
 M_constellation = 16
@@ -343,7 +340,7 @@ def _equalize_channel_ZF(H):
     N_sc, N_r, N_t = H.shape
     
     # Hermitian transpose of each subcarrier's H: (N_sc, N_t, N_r)
-    H_hermitian = np.conjugate(np.transpose(H, (0, 2, 1)))
+    H_hermitian = np.conjugate(np.transpose(H, (0, 2, 1)))  
     
     # (H^H * H) for all subcarriers: (N_sc, N_t, N_t)
     H_herm_H = np.matmul(H_hermitian, H)
@@ -933,7 +930,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     
     precoder = 'identity'            # Also: identity, SVD_Waterfilling
     channel_type = 'CDL-E'           # Channel type
-    quantization_b = 8               # Quantization resolution
+    quantization_b = np.inf          # Quantization resolution
     
     interference_power_dBm = -105    # dBm measured at the receiver
     p_interference = 0.00            # probability of interference
