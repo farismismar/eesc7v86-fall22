@@ -16,8 +16,6 @@ import matplotlib.pyplot as plt
 
 from sklearn.cluster import KMeans
 
-import pdb
-
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -43,7 +41,7 @@ N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power [W] (across all transmitters)
     
 max_transmissions = 500
-precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
+precoder = 'identity'                    # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
 channel_type = 'CDL-E'                   # Channel type: rayleigh, ricean, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
 
@@ -833,7 +831,7 @@ def _dft_codebook(N_t, k_oversample=1):
     
     
 def _find_channel_eigenmodes(H, subcarrier_idx=0):
-    _, S, _ = np.linalg.svd(H[subcarrier_idx,:,:], full_matrices=False, hermitian=True)
+    _, S, _ = np.linalg.svd(H[subcarrier_idx,:,:], full_matrices=False) #, hermitian=True)
     eigenmodes = S ** 2
     
     return eigenmodes
@@ -1097,7 +1095,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             # Replace the channel H with Sigma as a result of the operations on
             # X and Y above.            
             GH_estF = Gcomb@H_est@F # This is Sigma.  Is it diagonalized with elements equal the sqrt of eigenmodes?  Yes.
-
+            # np.sqrt(_find_channel_eigenmodes(H)) == GH_estF[0].round(4)
+            
             if (precoder == 'SVD') or (precoder == 'SVD_Waterfilling'):
                 assert np.allclose(GH_estF[0], np.diag(np.diagonal(GH_estF[0])))
             
