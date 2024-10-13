@@ -13,6 +13,7 @@ from scipy.constants import c
 import time
 
 import matplotlib.pyplot as plt
+import tikzplotlib
 
 from sklearn.cluster import KMeans
 
@@ -40,7 +41,7 @@ N_r = 4                                  # Number of receive antennas per user
 N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power [W] (across all transmitters)
     
-max_transmissions = 500
+max_transmissions = 200
 precoder = 'identity'                    # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
 channel_type = 'CDL-E'                   # Channel type: rayleigh, ricean, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
@@ -533,12 +534,11 @@ def _create_ricean_channel(G, N_sc, N_r, N_t, K_factor, sigma_dB):
     # Normalize channel to unity gain and add large scale gain
     # So the channel gain (tr(H)) is G.
     H /= np.trace(H)
-    H *= G_fading  # element multiplication.
+    H *= np.sqrt(G_fading)  # element multiplication.
 
     H_full = np.repeat(H[np.newaxis, :, :], N_sc, axis=0)  # Repeat for all subcarriers
 
     return H_full
-
 
 
 def _generate_cdl_c_channel(G, N_sc, N_r, N_t, sigma_dB):
@@ -906,6 +906,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     
     if filename is not None:
         plt.savefig(f'performance_{ylabel}_{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'performance_{ylabel}_{filename}.tikz')
     plt.show()
     plt.close(fig)
     
@@ -976,6 +977,7 @@ def _plot_constellation(constellation, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(f'constellation_{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'constellation_{filename}.tikz')
     plt.show()
     plt.close(fig)
     
@@ -1000,6 +1002,7 @@ def plot_channel(channel, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(f'channel_{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'channel_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1019,6 +1022,7 @@ def plot_IQ(signal, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(f'IQ_{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'IQ_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
