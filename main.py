@@ -6,14 +6,6 @@ Created on Sat Oct 12 12:22:29 2024
 @author: farismismar
 """
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Oct 5 17:18:31 2024
-
-@author: farismismar
-"""
-
 import numpy as np
 import pandas as pd
 from scipy.constants import c
