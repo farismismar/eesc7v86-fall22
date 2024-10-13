@@ -20,8 +20,6 @@ from sklearn.cluster import KMeans
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
-import pdb
-
 # # For Windows users
 # if os.name == 'nt':
 #     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
@@ -916,8 +914,6 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
 def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
     X_re = np.real(X)
     X_im = np.imag(X)
-    
-    pdb.set_trace()
     
     if text is None:
         text = ''
