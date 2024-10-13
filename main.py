@@ -1200,8 +1200,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     # Plot a quantized signal of the last run
     plot_IQ(Y, filename='IQ')
     
-    # Plot the SNR distribution of the last run
-    plot_pdf(df['sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=10, 
+    # Plot the SNR distribution for a given transmitted SNR
+    plot_pdf(df_detailed.loc[df_detailed['snr_dB'] == 30, 'sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=12, 
              filename='sinr', algorithm='empirical')
     ###########################################################################
     
