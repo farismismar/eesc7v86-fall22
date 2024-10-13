@@ -12,7 +12,7 @@ Channel equalization is performed through the choices of zero forcing and MMSE e
 
 Symbol detection is performed through two different algorithm: 1) maximum likelihood and 2) unsupervised learning.
 
-Symbol quantization through Lloyd-Max is also implemented.
+Symbol quantization through Lloyd-Max is also implemented from a forked implementation (credits in source code).
 
 Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), TX Eb/N0, bit error rate, pathloss, and block error rate.
 
