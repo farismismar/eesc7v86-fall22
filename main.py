@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Created on Sat Oct 12 12:22:29 2024
+
+@author: farismismar
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
 Created on Sat Oct 5 17:18:31 2024
 
 @author: farismismar
@@ -450,56 +458,54 @@ def estimate_channel(X, Y, snr_dB, algorithm):
     
     return None
 
-
-def quantize(X, b, tol=1e-6, max_iter=100):
-    if np.isinf(b):
+  
+def quantize(X, b, max_iteration=200):
+    if b == np.inf:
         return X
     
-    # Implement Lloyd-Max
-    # Number of quantization levels
-    L = 2**b
-
-    # Separate real and imaginary parts
-    X_real = np.real(X)
-    X_imag = np.imag(X)
-
-    # Find min and max values in real and imaginary parts
-    min_real, max_real = np.min(X_real), np.max(X_real)
-    min_imag, max_imag = np.min(X_imag), np.max(X_imag)
-
-    # Initialize the quantization levels (centroids) uniformly between min and max
-    centroids_real = np.linspace(min_real, max_real, L)
-    centroids_imag = np.linspace(min_imag, max_imag, L)
-
-    for _ in range(max_iter):
-        # Step 1: Partition boundaries (midpoints between centroids)
-        boundaries_real = (centroids_real[:-1] + centroids_real[1:]) / 2
-        boundaries_imag = (centroids_imag[:-1] + centroids_imag[1:]) / 2
-
-        # Step 2: Assign each real/imaginary part of X to the nearest centroid
-        X_real_b = np.digitize(X_real, boundaries_real)
-        X_imag_b = np.digitize(X_imag, boundaries_imag)
-
-        # Step 3: Recalculate the centroids
-        new_centroids_real = np.array([X_real[X_real_b == i].mean() if len(X_real[X_real_b == i]) > 0 else centroids_real[i] for i in range(L)])
-        new_centroids_imag = np.array([X_imag[X_imag_b == i].mean() if len(X_imag[X_imag_b == i]) > 0 else centroids_imag[i] for i in range(L)])
-
-        # Step 4: Check for convergence
-        if np.max(np.abs(new_centroids_real - centroids_real)) < tol and np.max(np.abs(new_centroids_imag - centroids_imag)) < tol:
-            break
-
-        centroids_real = new_centroids_real
-        centroids_imag = new_centroids_imag
-
-    # Quantize X to the nearest centroids
-    X_real_b = centroids_real[np.digitize(X_real, boundaries_real)]
-    X_imag_b = centroids_imag[np.digitize(X_imag, boundaries_imag)]
-
-    # Combine the real and imaginary parts
-    X_b = X_real_b + 1j * X_imag_b
-
-    return X_b
+    X_re = np.real(X)
+    X_im = np.imag(X)
     
+    if b == 1:
+        return np.sign(X_re) + 1j * np.sign(X_im)
+
+    # Very slow    
+    Xb_re = np.apply_along_axis(_lloyd_max_quantization, 0, X_re, b, max_iteration)
+    Xb_im = np.apply_along_axis(_lloyd_max_quantization, 0, X_im, b, max_iteration)
+
+    return Xb_re + 1j * Xb_im
+
+
+def _lloyd_max_quantization(x, b, max_iteration):
+    # derives the quantized vector
+    # https://gist.github.com/PrieureDeSion
+    # https://github.com/stillame96/lloyd-max-quantizer
+    from utils import normal_dist, expected_normal_dist, MSE_loss, LloydMaxQuantizer
+
+    repre = LloydMaxQuantizer.start_repre(x, b)
+    min_loss = 1.0
+    min_repre = repre
+    min_thre = LloydMaxQuantizer.threshold(min_repre)
+    
+    for i in np.arange(max_iteration):
+        thre = LloydMaxQuantizer.threshold(repre)
+        # In case wanting to use with another mean or variance,
+        # need to change mean and variance in utils.py file
+        repre = LloydMaxQuantizer.represent(thre, expected_normal_dist, normal_dist)
+        x_hat_q = LloydMaxQuantizer.quant(x, thre, repre)
+        loss = MSE_loss(x, x_hat_q)
+
+        # Keep the threhold and representation that has the lowest MSE loss.
+        if(min_loss > loss):
+            min_loss = loss
+            min_thre = thre
+            min_repre = repre
+
+    # x_hat_q with the lowest amount of loss.
+    best_x_hat_q = LloydMaxQuantizer.quant(x, min_thre, min_repre)
+    
+    return best_x_hat_q
+
     
 def create_channel(N_sc, N_r, N_t, shadow_fading_margin_dB=8, channel='rayleigh'):
     global np_random
@@ -532,9 +538,10 @@ def _create_ricean_channel(G, N_sc, N_r, N_t, K_factor, sigma_dB):
     H = np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t)) + \
         1j * np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t))
     
-    # Normalize channel to unity gain and add large scale gain    
+    # Normalize channel to unity gain and add large scale gain
+    # So the channel gain (tr(H)) is G.
     H /= np.trace(H)
-    H *= np.sqrt(G_fading / 2) # element multiplication.
+    H *= G_fading  # element multiplication.
 
     H_full = np.repeat(H[np.newaxis, :, :], N_sc, axis=0)  # Repeat for all subcarriers
 
@@ -618,12 +625,10 @@ def _generate_cdl_e_channel(G, N_sc, N_r, N_t, sigma_dB):
     return H
 
 
-def compute_large_scale_fading(d, f_c, D_t_dB=12, D_r_dB=0, pl_exp=1.2):
-    # TODO:  Something is not working well.
-    # l = c / f_c
-    # G = _linear(D_t_dB + D_r_dB) * (l / (4 * np.pi * d)) ** pl_exp
-    
-    G = 1
+def compute_large_scale_fading(d, f_c, D_t_dB=18, D_r_dB=2, pl_exp=1.07):
+    l = c / f_c
+    G = _linear(D_t_dB + D_r_dB) * (l / (4 * np.pi * d)) ** pl_exp
+
     assert (G <= 1)
     
     return G
@@ -906,6 +911,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.tight_layout()
+    
     if filename is not None:
         plt.savefig(f'performance_{ylabel}_{filename}.pdf', format='pdf', dpi=fig.dpi)
     plt.show()
@@ -954,6 +960,30 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(f'pdf_{algorithm}_{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'pdf_{algorithm}_{filename}.tikz')
+    plt.show()
+    plt.close(fig)
+    
+
+def _plot_constellation(constellation, filename=None):
+    fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+    plt.scatter(constellation['x_I'], constellation['x_Q'], c='k', marker='o', lw=2)
+    for idx, row in constellation.iterrows():
+        x, y = row[['x_I', 'x_Q']]
+        if y < 0:
+            yshift = -0.1
+        else:
+            yshift = 0.05
+        
+        ax.text(row['x_I'], row['x_Q'] + yshift, s='{}{}'.format(row['I'], row['Q']))
+        
+    plt.grid(True)
+    plt.xlabel('I')
+    plt.ylabel('Q')
+
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig(f'constellation_{filename}.pdf', format='pdf', dpi=fig.dpi)
     plt.show()
     plt.close(fig)
     
@@ -1167,21 +1197,23 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     end_time = time.time()
     
     # Plots
-    # Plot the noise pdf of the last run
-    plot_pdf(noise, text='noise', algorithm='KDE')
+    # noise after quantization for last run
+    GHFX, _ = channel_effect(GH_estF, X, snr_dB)
+    plot_pdf(Y - GHFX, text='noise', algorithm='KDE', filename='noise_alt')
     
     # Plot a quantized signal of the last run
-    plot_IQ(Y)
+    plot_IQ(Y, filename='IQ')
     
-    # Plot the SNR distribution
-    plot_pdf(df_detailed['sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=15, 
-             algorithm='empirical')
+    # Plot the SNR distribution of the last run
+    plot_pdf(df['sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=10, 
+             filename='sinr', algorithm='empirical')
     ###########################################################################
     
     _print_divider()
     print(f'Time elapsed: {((end_time - start_time) / 60.):.2f} mins.')
     
     return df, df_detailed
+
 
 df_results, df_detailed_results = run_simulation(transmit_SNR_dB,
                                                  constellation, 
