@@ -20,6 +20,8 @@ from sklearn.cluster import KMeans
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
+import pdb
+
 # # For Windows users
 # if os.name == 'nt':
 #     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
@@ -915,10 +917,12 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
     X_re = np.real(X)
     X_im = np.imag(X)
     
+    pdb.set_trace()
+    
     if text is None:
         text = ''
     else:
-        text = f' - {text}'
+        text = f'-{text}'
         
     is_complex = True
     if np.sum(X_im) == 0:
@@ -938,19 +942,20 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
         ax.legend()
     
     if algorithm == 'KDE':
-        df_re = pd.DataFrame(X_re).add_suffix(f'_Re{text}')
-        df_im = pd.DataFrame(X_im).add_suffix(f'_Im{text}')
+        df_re = pd.DataFrame(X_re).add_suffix(f'-{text}-Re')
+        df_im = pd.DataFrame(X_im).add_suffix(f'-{text}-Im')
         
         df = df_re.copy()
         if is_complex:
             df = pd.concat([df, df_im], axis=1, ignore_index=False)
-            df.plot(kind='kde', bw_method=0.3, ax=ax)
-    
+
+        df.plot(kind='kde', bw_method=0.3, ax=ax)
+        
     plt.grid(True)
     plt.xlabel('X')
     plt.ylabel('p(X)')
-    
     plt.tight_layout()
+    
     if filename is not None:
         plt.savefig(f'pdf_{algorithm}_{filename}.pdf', format='pdf', dpi=fig.dpi)
         tikzplotlib.save(f'pdf_{algorithm}_{filename}.tikz')
@@ -973,8 +978,8 @@ def _plot_constellation(constellation, filename=None):
     plt.grid(True)
     plt.xlabel('I')
     plt.ylabel('Q')
-
     plt.tight_layout()
+    
     if filename is not None:
         plt.savefig(f'constellation_{filename}.pdf', format='pdf', dpi=fig.dpi)
         tikzplotlib.save(f'constellation_{filename}.tikz')
@@ -998,8 +1003,8 @@ def plot_channel(channel, filename=None):
     plt.ylabel('Subcarriers')
     
     plt.xticks(range(N_t))
-    
     plt.tight_layout()
+    
     if filename is not None:
         plt.savefig(f'channel_{filename}.pdf', format='pdf', dpi=fig.dpi)
         tikzplotlib.save(f'channel_{filename}.tikz')
@@ -1018,8 +1023,8 @@ def plot_IQ(signal, filename=None):
     plt.legend()
     plt.xlabel('I')
     plt.ylabel('Q')
-
     plt.tight_layout()
+    
     if filename is not None:
         plt.savefig(f'IQ_{filename}.pdf', format='pdf', dpi=fig.dpi)
         tikzplotlib.save(f'IQ_{filename}.tikz')
@@ -1203,6 +1208,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     # Plot the SNR distribution for a given transmitted SNR
     plot_pdf(df_detailed.loc[df_detailed['snr_dB'] == 30, 'sinr_receiver_after_eq_dB'], text='SINR receiver', num_bins=12, 
              filename='sinr', algorithm='empirical')
+    plot_pdf(df_detailed.loc[df_detailed['snr_dB'] == 30, 'sinr_receiver_after_eq_dB'].values, text='SINR receiver', 
+             filename='sinr_kde', algorithm='KDE')
     ###########################################################################
     
     _print_divider()
