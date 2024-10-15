@@ -10,7 +10,7 @@ Channel estimation is performed through the use of least squares estimation and 
 
 Channel equalization is performed through the choices of zero forcing and MMSE equalizers.
 
-Symbol detection is performed through two different algorithm: 1) maximum likelihood and 2) unsupervised learning.
+Symbol detection is performed through three different algorithms: 1) maximum likelihood, 2) unsupervised learning, and 3) deep neural networks.
 
 Symbol quantization through Lloyd-Max is also implemented from a forked implementation (credits in source code).
 
@@ -30,9 +30,10 @@ If you use this codes (or any code segments thereof) in a scientific publication
 
 | Version        | Date           | Description  |
 | ------------- |:-------------:| :-----|
-| 0.1      | 2022-01-02 | First release |
-| 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28 |
+| 0.1      | 2022-01-02 | First release. |
+| 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28. |
 | 0.3      | 2024-01-03 | Major revision and error fixes. |
 | 0.4      | 2024-01-13 | More features. |
 | 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
 | 0.6      | 2024-10-11 | Simplified implementation and more features. |
+| 0.61     | 2024-10-15 | Implementation of Primer release of 2024-10-15. |
