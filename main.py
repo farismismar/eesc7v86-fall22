@@ -20,6 +20,14 @@ from sklearn.cluster import KMeans
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+from tensorflow import keras
+from tensorflow.keras import layers
+
+import pdb
+
 # # For Windows users
 # if os.name == 'nt':
 #     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
@@ -57,7 +65,7 @@ n_pilot = 4                              # Number of pilots for channel estimati
 
 MIMO_estimation = 'perfect'              # Also: perfect, LS, LMMSE
 MIMO_equalization = 'MMSE'               # Also: MMSE, ZF
-symbol_detection = 'ML'                  # Also: ML, kmeans
+symbol_detection = 'ML'                  # Also: ML, kmeans, DNN
 
 crc_generator = 0b1100_1101              # CRC generator polynomial
 
@@ -73,8 +81,8 @@ prefer_gpu = True
 seed = 42 # Reproduction
 np_random = np.random.RandomState(seed=seed)
 
-__ver__ = '0.6'
-__data__ = '2024-10-11'
+__ver__ = '0.61'
+__data__ = '2024-10-15'
 
 
 def create_bit_payload(payload_size):
@@ -650,6 +658,26 @@ def detect_symbols(x_sym_hat, alphabet, algorithm):
     if algorithm == 'ML':
         return _detect_symbols_ML(x_sym_hat, alphabet)
     
+    if algorithm == 'DNN':
+        y = alphabet['m'].values
+        X = np.c_[np.real(alphabet['x']), np.imag(alphabet['x'])]
+        
+        X_infer = x_sym_hat.flatten()
+        X_infer = np.c_[np.real(X_infer), np.imag(X_infer)]
+        
+        _, [train_acc_score, test_acc_score], y_infer = \
+            _detect_symbols_DNN(X, y, X_infer)
+            
+        print(f'DNN training accuracy is {train_acc_score:.2f}.')
+        
+        df = pd.merge(pd.DataFrame(data={'m': y_infer}), alphabet, on='m')
+        symbols = df['x'].values.reshape(x_sym_hat.shape)
+        information = df['m'].values.reshape(x_sym_hat.shape)
+        bits_i = df['I'].values.reshape(x_sym_hat.shape)
+        bits_q = df['Q'].values.reshape(x_sym_hat.shape)
+        
+        return information, symbols, [bits_i, bits_q]
+    
 
 def _detect_symbols_kmeans(x_sym_hat, alphabet):
     global np_random
@@ -709,6 +737,67 @@ def _detect_symbols_ML(symbols, alphabet):
     bits_q = bits_q.reshape(symbols.shape)
     
     return information, symbols, [bits_i, bits_q]
+
+
+def _detect_symbols_DNN(X_train, y_train, X_test, depth=0, width=2, epoch_count=10, batch_size=16):
+    global prefer_gpu
+    global np_random
+    
+    use_cuda = len(tf.config.list_physical_devices('GPU')) > 0 and prefer_gpu
+    device = "/gpu:0" if use_cuda else "/cpu:0"
+
+    _, nX = X_test.shape
+    
+    le = LabelEncoder()
+    le.fit(y_train)
+    encoded_y = le.transform(y_train)
+    Y_train = keras.utils.to_categorical(encoded_y)
+    
+    _, nY = Y_train.shape
+
+    dnn_classifier = __create_dnn(input_dimension=nX, output_dimension=nY,
+                                 depth=depth, width=width)
+    
+    with tf.device(device):
+        dnn_classifier.fit(X_train, Y_train, epochs=epoch_count, batch_size=batch_size)
+        
+    with tf.device(device):
+        Y_pred = dnn_classifier.predict(X_train)
+        _, training_accuracy_score, _ = dnn_classifier.evaluate(X_train, Y_train)
+        Y_test = dnn_classifier.predict(X_test)
+        loss, test_accuracy_score, _ = dnn_classifier.evaluate(X_test, Y_test)
+
+    # Reverse the encoded categories
+    y_train_pred = le.inverse_transform(np.argmax(Y_pred, axis=1))
+    y_test = le.inverse_transform(np.argmax(Y_test, axis=1))
+    
+    return dnn_classifier, [training_accuracy_score, test_accuracy_score], y_test
+
+
+def __loss_fn_classifier(Y_true, Y_pred):
+    cce = tf.keras.losses.CategoricalCrossentropy()
+    return cce(Y_true, Y_pred)
+
+
+def __create_dnn(input_dimension, output_dimension, depth=5, width=10):
+    model = keras.Sequential()
+    model.add(keras.Input(shape=(input_dimension,)))
+    
+    for hidden in range(depth):
+        model.add(layers.Dense(width, activation='sigmoid'))
+   
+    model.add(layers.Dense(output_dimension, activation='softmax'))
+    
+    model.compile(loss=__loss_fn_classifier, optimizer='adam', 
+                  metrics=['accuracy', 'categorical_crossentropy']) # Accuracy here is okay.
+    
+    # Reporting the number of parameters
+    print(model.summary())
+    
+    num_params = model.count_params()
+    print('Number of parameters: {}'.format(num_params))
+    
+    return model
 
 
 def bits_from_IQ(x_b_i, x_b_q):
@@ -1063,8 +1152,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     # Precoding right-multiply H with F
     HF = H@F
     
-    # The throughput can be computed by dividing the payload size by TTI.
-    print(f'Payload to be transmitted: {payload_size} bits per TTI.')
+    # The throughput can be computed by dividing the payload size by TTI (= 1 symbol duration)
+    print(f'Payload to be transmitted: {payload_size} bits over one OFDM symbol duration.')
     
     if precoder != 'dft_beamforming':
         print('Channel eigenmodes are: {}'.format(_find_channel_eigenmodes(H)))
