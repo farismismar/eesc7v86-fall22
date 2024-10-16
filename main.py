@@ -26,8 +26,6 @@ from sklearn.preprocessing import LabelEncoder
 from tensorflow import keras
 from tensorflow.keras import layers
 
-import pdb
-
 # # For Windows users
 # if os.name == 'nt':
 #     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
@@ -739,7 +737,7 @@ def _detect_symbols_ML(symbols, alphabet):
     return information, symbols, [bits_i, bits_q]
 
 
-def _detect_symbols_DNN(X_train, y_train, X_test, depth=0, width=2, epoch_count=10, batch_size=16):
+def _detect_symbols_DNN(X_train, y_train, X_test, depth=1, width=16, epoch_count=192, batch_size=32):
     global prefer_gpu
     global np_random
     
@@ -747,7 +745,19 @@ def _detect_symbols_DNN(X_train, y_train, X_test, depth=0, width=2, epoch_count=
     device = "/gpu:0" if use_cuda else "/cpu:0"
 
     _, nX = X_test.shape
+
+    # Make more data since the constellation size is small.
+    X_train_augmented = np.empty((0, nX))
+    epsilons = [1e-3, 1e-4, 1e-5, 1e-6]
     
+    for perturb in epsilons:
+        X_train_i = X_train + perturb
+        X_train_j = X_train - perturb
+        X_train_augmented = np.r_[X_train_augmented, X_train_i, X_train_j]
+    
+    X_train = np.r_[X_train, X_train_augmented]
+    y_train = np.tile(y_train, 2*len(epsilons) + 1)
+        
     le = LabelEncoder()
     le.fit(y_train)
     encoded_y = le.transform(y_train)
@@ -784,7 +794,7 @@ def __create_dnn(input_dimension, output_dimension, depth=5, width=10):
     model.add(keras.Input(shape=(input_dimension,)))
     
     for hidden in range(depth):
-        model.add(layers.Dense(width, activation='sigmoid'))
+        model.add(layers.Dense(width, activation='relu'))
    
     model.add(layers.Dense(output_dimension, activation='softmax'))
     
