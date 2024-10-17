@@ -23,6 +23,8 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 from tensorflow import keras
 from tensorflow.keras import layers
 
+import pdb
+
 # # For Windows users
 # if os.name == 'nt':
 #     os.add_dll_directory("/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.6/bin")
@@ -60,7 +62,7 @@ n_pilot = 4                              # Number of pilots for channel estimati
 
 MIMO_estimation = 'perfect'              # Also: perfect, LS, LMMSE
 MIMO_equalization = 'MMSE'               # Also: MMSE, ZF
-symbol_detection = 'DNN'                 # Also: ML, kmeans, DNN
+symbol_detection = 'kmeans'                 # Also: ML, kmeans, DNN
 
 crc_generator = 0b1100_1101              # CRC generator polynomial
 
@@ -76,7 +78,7 @@ prefer_gpu = True
 seed = 42 # Reproduction
 np_random = np.random.RandomState(seed=seed)
 
-__ver__ = '0.61'
+__ver__ = '0.614'
 __data__ = '2024-10-15'
 
 
@@ -686,14 +688,13 @@ def _detect_symbols_kmeans(x_sym_hat, alphabet):
     X = np.c_[X, np.imag(x_sym_hat_flat)]
     X = X.astype('float32')
     
-    centroids = alphabet[['x_I', 'x_Q']].values
-    centroids = centroids.astype('float32')
+    centroids = np.c_[np.real(alphabet['x']), np.imag(alphabet['x'])]
     
     # Intialize k-means centroid location deterministcally as a constellation
     kmeans = KMeans(n_clusters=M_constellation, init=centroids, n_init=1,
                     random_state=np_random).fit(centroids)
     
-    information = kmeans.predict(X).reshape(x_sym_hat.shape)
+    information = kmeans.predict(X)
     df_information = pd.DataFrame(data={'m': information})
     
     df = df_information.merge(alphabet, how='left', on='m')
