@@ -753,27 +753,36 @@ def _detect_symbols_DNN(X_train, y_train, X_test, depth=6, width=8, epoch_count=
     
     for perturb in epsilons:
         X_train_i = X_train + np_random.normal(0, scale=perturb, size=X_train.shape)
-        #X_train_j = X_train - np_random.normal(0, scale=perturb, size=X_train.shape)
-        X_train_augmented = np.r_[X_train_augmented, X_train_i] #, X_train_j]
+        X_train_augmented = np.r_[X_train_augmented, X_train_i]
     
     X_train = np.r_[X_train, X_train_augmented]
-    y_train = np.tile(y_train, 1 * len(epsilons) + 1)
+    y_train = np.tile(y_train, len(epsilons) + 1)
     
     Y_train = keras.utils.to_categorical(y_train)
     
     _, nY = Y_train.shape
 
-    dnn_classifier = __create_dnn(input_dimension=nX, output_dimension=nY,
-                                 depth=depth, width=width)
+    # If a DNN model is stored, use it.  Otherwise, train a DNN.    
+    try:
+        dnn_classifier = \
+            keras.models.load_model('dnn_detection.keras',
+                                    custom_objects={'__loss_fn_classifier': __loss_fn_classifier})
+        training_accuracy_score = np.nan # no training is done.
+    except Exception as e:
+        print(f'Failed to load model due to {e}.  Training from scratch.')
+        dnn_classifier = __create_dnn(input_dimension=nX, output_dimension=nY,
+                                     depth=depth, width=width)
     
-    with tf.device(device):
-        dnn_classifier.fit(X_train, Y_train, epochs=epoch_count,
-                           shuffle=False, 
-                           batch_size=batch_size)
+        with tf.device(device):
+            dnn_classifier.fit(X_train, Y_train, epochs=epoch_count,
+                               shuffle=False, 
+                               batch_size=batch_size)
+            dnn_classifier.save('dnn_detection.keras')
+            Y_pred = dnn_classifier.predict(X_train)
+            _, training_accuracy_score, _ = dnn_classifier.evaluate(X_train, Y_train)
 
+    # Perform inference.
     with tf.device(device):
-        Y_pred = dnn_classifier.predict(X_train)
-        _, training_accuracy_score, _ = dnn_classifier.evaluate(X_train, Y_train)
         Y_test = dnn_classifier.predict(X_test)
         loss, test_accuracy_score, _ = dnn_classifier.evaluate(X_test, Y_test)
     
