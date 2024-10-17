@@ -18,7 +18,7 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 
 The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
-The preprint updates will be uploaded here under the name `primer.pdf`
+The preprint updates will be uploaded to [arXiv](https://arxiv.org/pdf/2312.17713).
 
 ## Citation
 
