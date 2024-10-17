@@ -20,9 +20,6 @@ from sklearn.cluster import KMeans
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-
 from tensorflow import keras
 from tensorflow.keras import layers
 
@@ -63,7 +60,7 @@ n_pilot = 4                              # Number of pilots for channel estimati
 
 MIMO_estimation = 'perfect'              # Also: perfect, LS, LMMSE
 MIMO_equalization = 'MMSE'               # Also: MMSE, ZF
-symbol_detection = 'ML'                  # Also: ML, kmeans, DNN
+symbol_detection = 'DNN'                 # Also: ML, kmeans, DNN
 
 crc_generator = 0b1100_1101              # CRC generator polynomial
 
@@ -665,10 +662,13 @@ def detect_symbols(x_sym_hat, alphabet, algorithm):
         
         _, [train_acc_score, test_acc_score], y_infer = \
             _detect_symbols_DNN(X, y, X_infer)
-            
-        print(f'DNN training accuracy is {train_acc_score:.2f}.')
         
-        df = pd.merge(pd.DataFrame(data={'m': y_infer}), alphabet, on='m')
+        print(f'DNN training accuracy is {train_acc_score:.2f}.')
+        print(f'DNN test accuracy is {test_acc_score:.2f}.')
+        
+        df = pd.merge(pd.DataFrame(data={'m': y_infer}), alphabet, how='left', on='m')
+        
+        # Reverse the flatten operation
         symbols = df['x'].values.reshape(x_sym_hat.shape)
         information = df['m'].values.reshape(x_sym_hat.shape)
         bits_i = df['I'].values.reshape(x_sym_hat.shape)
@@ -737,7 +737,7 @@ def _detect_symbols_ML(symbols, alphabet):
     return information, symbols, [bits_i, bits_q]
 
 
-def _detect_symbols_DNN(X_train, y_train, X_test, depth=1, width=16, epoch_count=192, batch_size=32):
+def _detect_symbols_DNN(X_train, y_train, X_test, depth=6, width=8, epoch_count=512, batch_size=16):
     global prefer_gpu
     global np_random
     
@@ -747,21 +747,19 @@ def _detect_symbols_DNN(X_train, y_train, X_test, depth=1, width=16, epoch_count
     _, nX = X_test.shape
 
     # Make more data since the constellation size is small.
+    # This improves the learning significantly.
     X_train_augmented = np.empty((0, nX))
-    epsilons = [1e-3, 1e-4, 1e-5, 1e-6]
+    epsilons = [1e-2, 1e-3]
     
     for perturb in epsilons:
-        X_train_i = X_train + perturb
-        X_train_j = X_train - perturb
-        X_train_augmented = np.r_[X_train_augmented, X_train_i, X_train_j]
+        X_train_i = X_train + np_random.normal(0, scale=perturb, size=X_train.shape)
+        #X_train_j = X_train - np_random.normal(0, scale=perturb, size=X_train.shape)
+        X_train_augmented = np.r_[X_train_augmented, X_train_i] #, X_train_j]
     
     X_train = np.r_[X_train, X_train_augmented]
-    y_train = np.tile(y_train, 2*len(epsilons) + 1)
-        
-    le = LabelEncoder()
-    le.fit(y_train)
-    encoded_y = le.transform(y_train)
-    Y_train = keras.utils.to_categorical(encoded_y)
+    y_train = np.tile(y_train, 1 * len(epsilons) + 1)
+    
+    Y_train = keras.utils.to_categorical(y_train)
     
     _, nY = Y_train.shape
 
@@ -769,17 +767,18 @@ def _detect_symbols_DNN(X_train, y_train, X_test, depth=1, width=16, epoch_count
                                  depth=depth, width=width)
     
     with tf.device(device):
-        dnn_classifier.fit(X_train, Y_train, epochs=epoch_count, batch_size=batch_size)
-        
+        dnn_classifier.fit(X_train, Y_train, epochs=epoch_count,
+                           shuffle=False, 
+                           batch_size=batch_size)
+
     with tf.device(device):
         Y_pred = dnn_classifier.predict(X_train)
         _, training_accuracy_score, _ = dnn_classifier.evaluate(X_train, Y_train)
         Y_test = dnn_classifier.predict(X_test)
         loss, test_accuracy_score, _ = dnn_classifier.evaluate(X_test, Y_test)
-
-    # Reverse the encoded categories
-    y_train_pred = le.inverse_transform(np.argmax(Y_pred, axis=1))
-    y_test = le.inverse_transform(np.argmax(Y_test, axis=1))
+    
+    y_train_pred = np.argmax(Y_pred, axis=1)
+    y_test = np.argmax(Y_test, axis=1)    
     
     return dnn_classifier, [training_accuracy_score, test_accuracy_score], y_test
 
@@ -798,7 +797,7 @@ def __create_dnn(input_dimension, output_dimension, depth=5, width=10):
    
     model.add(layers.Dense(output_dimension, activation='softmax'))
     
-    model.compile(loss=__loss_fn_classifier, optimizer='adam', 
+    model.compile(loss=__loss_fn_classifier, optimizer=keras.optimizers.Adam(learning_rate=1e-2),
                   metrics=['accuracy', 'categorical_crossentropy']) # Accuracy here is okay.
     
     # Reporting the number of parameters
@@ -1043,8 +1042,10 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
         df = df_re.copy()
         if is_complex:
             df = pd.concat([df, df_im], axis=1, ignore_index=False)
-
-        df.plot(kind='kde', bw_method=0.3, ax=ax)
+        try:
+            df.plot(kind='kde', bw_method=0.3, ax=ax)
+        except Exception as e:
+            print(f"Failed to generate plot due to {e}.")
         
     plt.grid(True)
     plt.xlabel('X')
