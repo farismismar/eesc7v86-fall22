@@ -18,7 +18,7 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 
 The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
-The preprint updates will be uploaded to [arXiv](https://arxiv.org/pdf/2312.17713).
+The preprint updates will be uploaded to [arXiv](https://arxiv.org/pdf/2312.17713).  The code is best run on Python `3.9.13` on Windows with TensorFlow `2.10.0` with GPU support with a supported NVIDIA GPU running cuDNN `9.5.0` and cuda `12.6.2`. 
 
 ## Citation
 
