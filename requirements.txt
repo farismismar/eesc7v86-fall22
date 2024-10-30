@@ -6,3 +6,4 @@ pandas==2.2.3
 scikit-learn==1.5.2
 scipy==1.13.1
 tensorflow==2.10.1
+tikzplotlib==0.9.16
