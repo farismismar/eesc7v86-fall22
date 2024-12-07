@@ -12,15 +12,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import matplotlib2tikz
+import tikzplotlib
 
 class PlottingUtils:
-    def __init__(self, seed, cmap=None):
+    def __init__(self, seed, results_folder=None, cmap=None):
         plt.rcParams['font.family'] = "Arial"
         plt.rcParams['font.size'] = "14"
         
         self.cmap = None
         
+        if results_folder is None:
+            self.results_folder = './'
+        else:
+            self.results_folder = results_folder
+            
         if cmap is not None:
             self.cmap = cmap
         
@@ -50,12 +55,17 @@ class PlottingUtils:
         if title is not None:
             plt.title(title)
             
-        plt.tight_layout()
+        plt.tight_layout()        
+        filename = 'plot_xy'
+        plt.savefig(f'{self.results_folder}/{filename}.png', dpi=fig.dpi)
+        tikzplotlib.save(f'{self.results_folder}/{filename}.tikz')        
         plt.show()
         plt.close(fig)
         
         
-    def plotXY_comparison(self, x, y1, y2, y3, xlabel, y1label, y2label, y3label, logx=False, logy=False, title=None):    
+    def plotXY_comparison(self, x, y1, y2, y3, xlabel, ylabel, y1label, y2label, y3label, logx=False, logy=False, title=None):    
+        results_folder = self.results_folder
+        
         fig = plt.figure(figsize=(8, 5))
         ax = fig.add_subplot(111)
 
@@ -83,12 +93,18 @@ class PlottingUtils:
             plt.title(title)
 
         ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         plt.tight_layout()
+        filename = 'plot_xy_comparison'
+        plt.savefig(f'{results_folder}/{filename}.pdf', format='pdf', dpi=fig.dpi)
+        tikzplotlib.save(f'{results_folder}/{filename}.tikz')     
         plt.show()
         plt.close(fig)
         
     
     def plot_box(self, df, measure, category, title=None, cmap=None):
+        results_folder = self.results_folder
+        
         # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
@@ -106,13 +122,16 @@ class PlottingUtils:
         plt.title(title)
         plt.grid()
         
-        filename = f'box_plot_{measure}.png'
-        plt.savefig(f'./{filename}', dpi=fig.dpi)
+        filename = f'box_plot_{measure}'
+        plt.savefig(f'{results_folder}/{filename}.png', dpi=fig.dpi)
+        tikzplotlib.save(f'{results_folder}/{filename}.tikz')
         plt.show()
         plt.close(fig)
         
     
     def _plot_cdfs_kde(self, df, measure, category, cmap=None, title=None):
+        results_folder = self.results_folder
+        
         # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
@@ -131,14 +150,17 @@ class PlottingUtils:
         plt.grid()
         
         plt.tight_layout()
-        filename = f'cdf_{measure}.png'
-        plt.savefig(f'./{filename}', dpi=fig.dpi)
+        filename = f'cdf_{measure}'
+        plt.savefig(f'{results_folder}/{filename}.png', dpi=fig.dpi)
+        tikzplotlib.save(f'{results_folder}/{filename}.tikz')
         plt.xlim([df[measure].min(), df[measure].max()])
         plt.show()
         plt.close(fig)
         
         
     def _plot_cdfs(self, df, measure, category, cmap=None, title=None, num_bins=200):
+        results_folder = self.results_folder
+        
         # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
@@ -168,8 +190,9 @@ class PlottingUtils:
         plt.grid()
         plt.legend()
         plt.tight_layout()
-        filename = f'cdf_{measure}.png'
-        plt.savefig(f'./{filename}', dpi=fig.dpi)
+        filename = f'cdf_{measure}'
+        plt.savefig(f'{results_folder}/{filename}.png', dpi=fig.dpi)
+        tikzplotlib.save(f'{results_folder}/{filename}.tikz')
         plt.show()
         plt.close(fig)
         
@@ -182,6 +205,8 @@ class PlottingUtils:
             
         
     def plot_pdfs(self, df, measure, category, cmap=None, title=None, num_bins=200):
+        results_folder = self.results_folder
+        
         # Note if you do not have a category, consider using the pd.melt() function
         if cmap is None:
             cmap = self.cmap
@@ -212,13 +237,16 @@ class PlottingUtils:
         plt.grid()
         plt.legend()
         plt.tight_layout()
-        filename = f'pdf_{measure}.png'
-        plt.savefig(f'./{filename}', dpi=fig.dpi)
+        filename = f'pdf_{measure}'
+        plt.savefig(f'{results_folder}/{filename}.png', dpi=fig.dpi)
+        tikzplotlib.save(f'{results_folder}/{filename}.tikz')
         plt.show()
         plt.close(fig)
     
     
     def plot_joint_pdf(self, X, Y, x_label, y_label, title=None, num_bins=50):
+        results_folder = self.results_folder
+        
         fig = plt.figure(figsize=(8, 5))
 
         H, X_bin_edges, Y_bin_edges = np.histogram2d(X, Y, bins=(num_bins, num_bins), normed=True)
@@ -263,13 +291,15 @@ class PlottingUtils:
     
         plt.tight_layout()
     
-        plt.savefig('joint_throughput_pdf.pdf', format='pdf')
-        matplotlib2tikz.save('joint_throughput_pdf.tikz')
+        plt.savefig(f'{results_folder}/joint_throughput_pdf.pdf', format='pdf')
+        tikzplotlib.save(f'{results_folder}/joint_throughput_pdf.tikz')
         plt.show()
         plt.close(fig)
     
 
     def plot_joint_cdf(self, X, Y, x_label, y_label, title=None, num_bins=100):
+        results_folder = self.results_folder
+        
         fig = plt.figure(figsize=(8, 5))
     
         H, X_bin_edges, Y_bin_edges = np.histogram2d(X, Y, bins=(num_bins, num_bins), normed=True)
@@ -318,8 +348,8 @@ class PlottingUtils:
     
         plt.tight_layout()
     
-        plt.savefig('joint_throughput_cdf.pdf', format='pdf')
-        matplotlib2tikz.save('joint_throughput_cdf.tikz')
+        plt.savefig(f'{results_folder}/joint_throughput_cdf.pdf', format='pdf')
+        tikzplotlib.save(f'{results_folder}/joint_throughput_cdf.tikz')
         plt.show()
         plt.close(fig)
     
