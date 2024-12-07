@@ -37,3 +37,4 @@ If you use this codes (or any code segments thereof) in a scientific publication
 | 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
 | 0.6      | 2024-10-11 | Simplified implementation and more features. |
 | 0.61     | 2024-10-15 | Implementation of Primer release of 2024-10-15. |
+| 0.7      | 2024-12-07 | Final release. |
