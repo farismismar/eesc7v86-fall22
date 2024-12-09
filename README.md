@@ -10,7 +10,7 @@ Channel estimation is performed through the use of least squares estimation and 
 
 Channel equalization is performed through the choices of zero forcing and MMSE equalizers.
 
-Symbol detection is performed through three different algorithms: 1) maximum likelihood, 2) unsupervised learning, and 3) deep neural networks.
+Symbol detection is performed through four different algorithms: 1) maximum likelihood, 2) ensemble learners (forest), 3) unsupervised learning, and 4) deep neural networks.
 
 Symbol quantization through Lloyd-Max is also implemented from a forked implementation (credits in source code).
 
@@ -22,7 +22,7 @@ The preprint updates will be uploaded to [arXiv](https://arxiv.org/pdf/2312.1771
 
 ## Citation
 
-If you use this codes (or any code segments thereof) in a scientific publication, we would appreciate citations to the this preprint to keep track of the impact.
+If you use this code (or any code segments thereof) in a scientific publication, we would appreciate citations to the this preprint to keep track of the impact.
 
 `@misc{mismar2023quick, title={A Quick Primer on Machine Learning in Wireless Communications}, author={Faris B. Mismar}, year={2023}, month=dec, eprint={2312.17713}, archivePrefix={arXiv}, primaryClass={cs.NI}}`
 
