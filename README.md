@@ -1,5 +1,7 @@
 # EESC 7v86 Selected Topics in Wireless Communications: Deep Learning for 5G
 
+![](https://github.com/farismismar/eesc7v86-fall22/blob/main/run_video.gif)
+
 This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel and both QAM and QPSK symbols (Gray coded).  The simulation is for a single OFDM symbol and a single user.
 
 MIMO precoding is done via singular value decomposition (SVD), waterfilling, and identity.  Beamforming through the use of discrete Fourier transform (DFT) codebook is implemented.
