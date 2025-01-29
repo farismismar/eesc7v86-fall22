@@ -1,4 +1,4 @@
-# EESC 7v86 Selected Topics in Wireless Communications: Deep Learning for 5G
+# A Quick Primer on Machine Learning in Wireless Communications
 
 ![](https://github.com/farismismar/eesc7v86-fall22/blob/main/run_video.gif)
 
@@ -21,6 +21,10 @@ Statistics reported are the channel estimation mean squared error, signal to noi
 The additional file `PlottingUtils.py` is a class used to plot probability density functions (PDF) and cumulative distribution functions (CDF) for various configurations (joint, marginal) PDFs and CDFs, box plots, and PDFs/CDFs for mulitple variables on a single plot.
 
 The preprint updates will be uploaded to [arXiv](https://arxiv.org/pdf/2312.17713).  The code is best run on Python `3.9.13` on Windows with TensorFlow `2.10.0` with GPU support with a supported NVIDIA GPU running cuDNN `9.5.0` and cuda `12.6.2`. 
+
+## Teaching
+
+I use this code in my course EESC 7v86: Special Topics in Wireless Communications: Deep Learning in 5G.  I offer and teach this course at UT-Dallas on part-time basis whenever I have the availability and adequate student interest.
 
 ## Citation
 
