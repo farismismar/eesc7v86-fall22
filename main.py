@@ -90,8 +90,8 @@ prefer_gpu = True
 seed = 42  # Reproduction
 np_random = np.random.RandomState(seed=seed)
 
-__ver__ = '0.7'
-__data__ = '2024-12-07'
+__ver__ = '0.71'
+__data__ = '2025-03-10'
 
 
 def create_bit_payload(payload_size):
@@ -594,8 +594,8 @@ def _create_ricean_channel(G, N_sc, N_r, N_t, K_factor, sigma_dB):
         1j * np_random.normal(loc=mu, scale=sigma, size=(N_r, N_t))
 
     # Normalize channel to unity gain and add large scale gain
-    # So the channel gain (tr(H)) is G.
-    H /= np.trace(H)
+    # So the channel gain is G.
+    H /= np.linalg.norm(H, ord='fro')
     H *= np.sqrt(G_fading)  # element multiplication.
 
     H_full = np.repeat(H[np.newaxis, :, :], N_sc, axis=0)  # Repeat for all subcarriers
