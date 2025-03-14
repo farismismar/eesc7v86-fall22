@@ -15,7 +15,7 @@ import time
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.ticker import MaxNLocator
-import tikzplotlib
+# import #tikzplotlib
 
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
@@ -57,12 +57,13 @@ N_sc = 64                                # Number of subcarriers
 P_BS = 4                                 # Base station transmit power [W] (across all transmitters)
 
 max_transmissions = 300
-precoder = 'identity'                    # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
-channel_type = 'CDL-E'                   # Channel type: rayleigh, ricean, CDL-C, CDL-E
+precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
+channel_type = 'CDL-E'                   # Channel type: awgn, rayleigh, ricean, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
 
 Df = 15e3                                # OFDM subcarrier bandwidth [Hz].
 f_c = 1800e6                             # Center frequency [MHz] for large scale fading and DFT.
+noise_figure = 5                         # Receiver noise figure [dB]
 interference_power_dBm = -105            # dBm measured at the receiver
 p_interference = 0.00                    # probability of interference
 
@@ -78,7 +79,7 @@ crc_generator = 0b1100_0100              # CRC generator polynomial
 channel_compression_ratio = 0            # Channel compression
 
 # Transmit SNR in dB
-transmit_SNR_dB = [0, 5, 10, 15, 20, 25, 30][::-1]
+transmit_SNR_dB = [-10, -5, 0, 5, 10, 15, 20, 25, 30][::-1]
 ###############################################################################
 
 plt.rcParams['font.family'] = "Arial"
@@ -90,8 +91,8 @@ prefer_gpu = True
 seed = 42  # Reproduction
 np_random = np.random.RandomState(seed=seed)
 
-__ver__ = '0.71'
-__data__ = '2025-03-10'
+__ver__ = '0.72'
+__data__ = '2025-03-14'
 
 
 def create_bit_payload(payload_size):
@@ -567,7 +568,10 @@ def create_channel(N_sc, N_r, N_t, shadow_fading_margin_dB=8, channel='rayleigh'
     global f_c
 
     G = compute_large_scale_fading(d=1, f_c=f_c)
-
+    
+    if channel == 'awgn':
+        return _create_awgn_channel(N_sc, N_r, N_t)
+    
     if channel == 'ricean':
         return _create_ricean_channel(G, N_sc, N_r, N_t, K_factor=4, sigma_dB=shadow_fading_margin_dB)
 
@@ -579,6 +583,12 @@ def create_channel(N_sc, N_r, N_t, shadow_fading_margin_dB=8, channel='rayleigh'
 
     if channel == 'CDL-E':
         return _generate_cdl_e_channel(G, N_sc, N_r, N_t, sigma_dB=shadow_fading_margin_dB)
+
+def _create_awgn_channel(N_sc, N_r, N_t):
+    H = np.eye(N_r, N_t)
+    H = np.repeat(H[np.newaxis, :, :], N_sc, axis=0)  # Repeat for all subcarriers
+    
+    return H
 
 
 def _create_ricean_channel(G, N_sc, N_r, N_t, K_factor, sigma_dB):
@@ -807,7 +817,7 @@ def denoise_signal(x_noisy, x_original, epochs=100, batch_size=16, learning_rate
         plt.tight_layout()
 
         plt.savefig(f'{output_path}/denoising.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/denoising.tikz')
+        #tikzplotlib.save(f'{output_path}/denoising.tikz')
 
         plt.show()
         plt.close(fig)
@@ -1351,6 +1361,22 @@ def _matrix_vector_multiplication(A, B):
         return A@B
 
 
+def plot_scatter(df, xlabel, ylabel, filename=None):
+    global output_path
+    
+    fig, ax = plt.subplots(figsize=(9, 6))
+    plt.scatter(df[xlabel], df[ylabel], s=6, c='r', edgecolors='none', alpha=0.2)
+
+    plt.grid(which='both')
+
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.tight_layout()
+    
+    plt.show()
+    plt.close(fig)
+    
+
 def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
     global output_path
 
@@ -1373,7 +1399,7 @@ def plot_performance(df, xlabel, ylabel, semilogy=True, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/performance_{ylabel}_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/performance_{ylabel}_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/performance_{ylabel}_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1425,7 +1451,7 @@ def plot_pdf(X, text=None, algorithm='empirical', num_bins=200, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/pdf_{algorithm}_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/pdf_{algorithm}_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/pdf_{algorithm}_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1447,7 +1473,7 @@ def _plot_keras_learning(history, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/history_keras_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/history_keras_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/history_keras_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1475,7 +1501,7 @@ def _plot_constellation(constellation, annotate=False, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/constellation_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/constellation_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/constellation_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1507,7 +1533,7 @@ def plot_channel(channel, vmin=None, vmax=None, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/channel_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/channel_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/channel_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1529,7 +1555,7 @@ def plot_IQ(signal, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/IQ_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/IQ_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/IQ_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1800,7 +1826,7 @@ def _plot_Q_learning_performance(values, num_episodes, is_loss=False, filename=N
 
     if filename is not None:
         plt.savefig(f'{output_path}/Qlearning_perf_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/Qlearning_perf_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/Qlearning_perf_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1820,7 +1846,7 @@ def _plot_environment_measurements(environment_measurements, time_steps, measure
 
     if filename is not None:
         plt.savefig(f'{output_path}/environment_{measurement}_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/environment_{measurement}_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/environment_{measurement}_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1841,7 +1867,7 @@ def _plot_agent_actions(agent_actions, time_steps, filename=None):
 
     if filename is not None:
         plt.savefig(f'{output_path}/actions_{filename}.pdf', format='pdf', dpi=fig.dpi)
-        tikzplotlib.save(f'{output_path}/actions_{filename}.tikz')
+        #tikzplotlib.save(f'{output_path}/actions_{filename}.tikz')
     plt.show()
     plt.close(fig)
 
@@ -1975,6 +2001,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     global P_BS
 
     global precoder, channel_type, quantization_b, Df, max_transmissions
+    global MIMO_estimation, MIMO_equalization, symbol_detection
     global p_interference, interference_power_dBm
     global channel_compression_ratio
 
@@ -1993,11 +2020,13 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
     _plot_constellation(alphabet, annotate=True, filename='constellation')
 
     k_constellation = int(np.log2(M_constellation))
-
+    code_rate = 1  # hardcoded for now
+    
     X_information, X, [x_b_i, x_b_q], payload_size, crc_transmitter = generate_transmit_symbols(N_sc, N_s, alphabet=alphabet, P_TX=P_TX)
     bits_transmitter, codeword_transmitter = bits_from_IQ(x_b_i, x_b_q)
     P_X = np.mean(_signal_power(X)) * Df
-
+    P_X_dBm = _dB(P_X * 1e3)
+    
     P = generate_pilot_symbols(N_t, n_pilot, P_TX, kind='dft')
     H = create_channel(N_sc, N_r, N_t, channel=channel_type, shadow_fading_margin_dB=8)
 
@@ -2015,9 +2044,10 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
 
     plot_channel(H, filename=channel_type)
 
-    df = pd.DataFrame(columns=['snr_dB', 'n', 'EbN0_dB', 'snr_transmitter_dB',
+    df = pd.DataFrame(columns=['n', 'snr_dB', 'Tx_EbN0_dB', 'Tx_Pwr_dBm',
                                'channel_estimation_error', 'compression_loss',
-                               'PL_dB', 'sinr_receiver_after_eq_dB',
+                               'PL_dB', 'Rx_Pwr_dBm', 'sinr_receiver_before_eq_dB',
+                               'sinr_receiver_after_eq_dB', 'Rx_EbN0_dB',
                                'BER', 'BLER'])
 
     df_detailed = df.copy().rename({'BLER': 'total_block_errors'}, axis=1)
@@ -2040,6 +2070,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
 
             # Interference
             interference = generate_interference(Y, p_interference, interference_power_dBm)
+            P_interference = np.mean(_signal_power(interference)) * Df
+
             Y += interference
 
             # Left-multiply y and noise with Gcomb
@@ -2056,9 +2088,15 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
 
             PL_dB = _dB(P_X) - _dB(P_Y)
 
-            snr_transmitter_dB = _dB(P_X/P_noise) # This should be very close to snr_dB.
-            # EbN0_transmitter_dB = snr_transmitter_dB - _dB(k_constellation)
-
+            # snr_transmitter_dB = _dB(P_X/P_noise) # This should be very close to snr_dB.
+            
+            # Note to self: PL is not P_Y / P_X.  The noise power is not subtracted.
+            # Thus: P_noise + P_X / P_H ~ P_Y (where P_H is the path gain)
+            P_Hx = _linear(_dB(P_X) - PL_dB)
+            P_Hx_dBm = _dB(P_Hx * 1e3)
+            
+            snr_rx_dB_pre_eq = _dB(P_Hx) - _dB(P_noise) - noise_figure
+            
             # Estimate from pilots
             H_est = H if MIMO_estimation == 'perfect' else estimate_channel(P, T, snr_dB, algorithm=MIMO_estimation)
             estimation_error = _mse(H, H_est)
@@ -2069,31 +2107,37 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
 
             # Replace the channel H with Sigma as a result of the operations on
             # X and Y above.
-            GH_estF = Gcomb@H_est@F # This is Sigma.  Is it diagonalized with elements equal the sqrt of eigenmodes?  Yes.
+            GH_est = Gcomb@H_est  # This is not Sigma
+            Sigma = GH_est@F  # This is Sigma.  Is it diagonalized with elements equal the sqrt of eigenmodes when using SVD?  Yes.
+            
             # np.sqrt(_find_channel_eigenmodes(H)) == GH_estF[0].round(4)
 
             if (channel_compression_ratio == 0) and ((precoder == 'SVD') or (precoder == 'SVD_Waterfilling')):
-                assert np.allclose(GH_estF[0], np.diag(np.diagonal(GH_estF[0])))
+                assert np.allclose(Sigma[0], np.diag(np.diagonal(Sigma[0])))
 
             if precoder != 'dft_beamforming':
-                W = equalize_channel(GH_estF, snr_dB, algorithm=MIMO_equalization)
+                W = equalize_channel(Sigma, snr_dB, algorithm=MIMO_equalization)
             else:
                 W = np.ones((N_t, N_sc)) # no equalization necessary for beamforming.
 
-            # # Note:  Often, keep an eye on the product (W@GH_estF).round(1) and see how close it is to I.
-            # if not np.allclose((W@GH_estF)[0].round(1), np.eye(N_t)):
-            #     print("WARNING")
-
+            # Derivation:
+            # GY = G(HFx + n)
+            # WGY = WGHFx + WGn
+            # z = WSigma x + WGn
+            # z = x + v 
+            # x_hat = argmax p_v(z | x)
+            
+            # W@H_est is ones or I (W@H_est).round(2) or (W@Sigma).round(2) for precoding
             z = _matrix_vector_multiplication(W, Y)
-            v = _matrix_vector_multiplication(W, noise)
-            q = _matrix_vector_multiplication(W, interference)
-
-            P_z = np.mean(_signal_power(z)) * Df
-            P_v = np.mean(_signal_power(v)) * Df
-            P_q = np.mean(_signal_power(q)) * Df
-
-            sinr_receiver_after_eq_dB = _dB(P_z/(P_v + P_q))
-
+            # v = _matrix_vector_multiplication(W, noise)
+            # q = _matrix_vector_multiplication(W, interference)
+            
+            P_x_hat_dB = _dB(np.linalg.norm(W[0, :, :], ord='fro') ** 2) + _dB(np.linalg.norm(Gcomb[0, :, :], ord='fro') ** 2) +  _dB(np.linalg.norm(F[0, :, :], ord='fro') ** 2) + P_X_dBm
+            P_v_dB = _dB(np.linalg.norm(W[0, :, :], ord='fro') ** 2) + _dB(np.linalg.norm(Gcomb[0, :, :], ord='fro') ** 2) + _dB(P_noise + P_interference)
+            
+            snr_rx_dB = P_x_hat_dB - P_v_dB - noise_figure
+            EbN0_rx_dB = snr_rx_dB - _dB(k_constellation * code_rate)
+            
             # Now conduct symbol detection to find x hat from z.
             X_hat_information, X_hat, [x_hat_b_i, x_hat_b_q] = detect_symbols(z, alphabet, algorithm=symbol_detection)
 
@@ -2119,9 +2163,10 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
             if precoder != 'dft_beamforming':
                 BER_i = compute_bit_error_rate(codeword_transmitter[:-crc_pad_length], codeword_receiver)
             BER.append(BER_i)
-
-            to_append_i = [snr_dB, n_transmission, EbN0_dB, snr_transmitter_dB, estimation_error, compression_loss,
-                           PL_dB, sinr_receiver_after_eq_dB, BER_i, block_error]
+            
+            to_append_i = [n_transmission, snr_dB, EbN0_dB, P_X_dBm, estimation_error, compression_loss,
+                           PL_dB, P_Hx_dBm, snr_rx_dB_pre_eq, snr_rx_dB, EbN0_rx_dB, BER_i, block_error]
+            
             df_to_append_i = pd.DataFrame([to_append_i], columns=df_detailed.columns)
 
             if df_detailed.shape[0] == 0:
@@ -2133,7 +2178,8 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
         BER = np.mean(BER)
         BLER = block_error / max_transmissions
 
-        to_append = [snr_dB, EbN0_dB, snr_transmitter_dB, estimation_error, compression_loss, PL_dB, sinr_receiver_after_eq_dB, BER, BLER]
+        to_append = [snr_dB, EbN0_dB, P_X_dBm, estimation_error, compression_loss,
+                       PL_dB, P_Hx_dBm, snr_rx_dB_pre_eq, snr_rx_dB, EbN0_rx_dB, BER, BLER]
         df_to_append = pd.DataFrame([to_append], columns=df.columns)
 
         rounded = [f'{x:.3f}' for x in to_append]
@@ -2150,7 +2196,7 @@ def run_simulation(transmit_SNR_dB, constellation, M_constellation, crc_generato
 
     # Plots
     # noise after quantization for last run
-    GHFX, _ = channel_effect(GH_estF, X, snr_dB)
+    GHFX, _ = channel_effect(Sigma, X, snr_dB)
     plot_pdf(Y - GHFX, text='noise', algorithm='KDE', filename='noise_alt')
 
     # Plot a quantized signal of the last run
@@ -2274,10 +2320,10 @@ df_results, df_detailed_results = run_simulation(transmit_SNR_dB,
                                                   M_constellation, crc_generator,
                                                   N_sc, N_r, N_t)
 
-plot_performance(df_results, xlabel='EbN0_dB', ylabel='BER', semilogy=True, filename='BER')
-plot_performance(df_results, xlabel='EbN0_dB', ylabel='BLER', semilogy=True, filename='BLER')
+plot_performance(df_results, xlabel='Tx_EbN0_dB', ylabel='BER', semilogy=True, filename='BER')
+plot_performance(df_results, xlabel='Tx_EbN0_dB', ylabel='BLER', semilogy=True, filename='BLER')
 ###############################################################################
-
+'''
 # CNN-based equalization
 ###############################################################################
 X_test, y_test, y_pred = equalize_rotation_channel_CNN(theta=np.pi/24, SNR_dB=30,
@@ -2332,3 +2378,5 @@ H_est = _estimate_channel_linear_regression(X, y)
 
 estimation_error = _mse(H, H_est)
 print(f'Using linear regression, estimation error is: {estimation_error:.4f}.')
+
+'''
