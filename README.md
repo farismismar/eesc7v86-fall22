@@ -2,9 +2,11 @@
 
 ![](https://github.com/farismismar/eesc7v86-fall22/blob/main/run_video.gif)
 
-This is a code repository that allows its user to generate statistics of a multiple input, multiple output (MIMO) wireless channel and both QAM and QPSK symbols (Gray coded).  The simulation is for a single OFDM symbol and a single user.
+This is a code repository that allows its user to generate statistics of a MIMO-OFDM wireless channel and both QAM and QPSK symbols (Gray coded).  The simulation is for a single OFDM symbol and a single user.
 
 MIMO precoding is done via singular value decomposition (SVD), waterfilling, and identity.  Beamforming through the use of discrete Fourier transform (DFT) codebook is implemented.
+
+Several fading channels are implemented: AWGN, Ricean (and Rayleigh), and 3GPP CDL-A, CDL-C, and CDL-E channels.  The channels are normalized such that their power gain is equal to one.  The large scale gain and shadow fading are implemented per OFDM subcarrier.
 
 Several channel operations are performed: channel estimation, channel equalization, and symbol detection.
 
@@ -14,7 +16,7 @@ Channel equalization is performed through the choices of zero forcing and MMSE e
 
 Symbol detection is performed through four different algorithms: 1) maximum likelihood, 2) ensemble learners (forest), 3) unsupervised learning, and 4) deep neural networks.
 
-Symbol quantization through Lloyd-Max is also implemented from a forked implementation (credits in source code).
+Symbol quantization through Lloyd-Max is also implemented from a forked implementation (credits in source code).  Quantization is optional.
 
 Statistics reported are the channel estimation mean squared error, signal to noise ratio (both TX and RX), TX Eb/N0, bit error rate, pathloss, and block error rate.
 
@@ -43,4 +45,5 @@ If you use this code (or any code segments thereof) in a scientific publication,
 | 0.5      | 2024-07-29 | More revisions and 3gpp CDL-C and CDL-E channels. |
 | 0.6      | 2024-10-11 | Simplified implementation and more features. |
 | 0.61     | 2024-10-15 | Implementation of Primer release of 2024-10-15. |
-| 0.7      | 2024-12-07 | Final release. |
+| 0.7      | 2024-12-07 | Final release for Primer 2024-12-07. |
+| 0.8      | 2025-03-19 | Minor feature improvements. |
