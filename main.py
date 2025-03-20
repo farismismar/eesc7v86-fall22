@@ -6,8 +6,6 @@ Created on Sat Oct 12 12:22:29 2024
 @author: farismismar
 """
 
-# This is re-write of the primer v0.8
-
 import numpy as np
 import pandas as pd
 from scipy.constants import speed_of_light
@@ -59,7 +57,7 @@ N_sc = 64                                # Number of subcarriers
 P_TX = 1                                 # Signal transmit power per antenna (bandwidth-normalized) [W]
 
 max_transmissions = 500
-precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming  # precoder is the problem
+precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
 channel_type = 'CDL-E'                   # Channel type: awgn, rayleigh, ricean, CDL-A, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
 
