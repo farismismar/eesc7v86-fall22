@@ -58,7 +58,7 @@ P_TX = 1                                 # Signal transmit power per antenna (ba
 
 max_transmissions = 500
 precoder = 'SVD_Waterfilling'            # Also: identity, SVD, SVD_Waterfilling, dft_beamforming
-channel_type = 'CDL-E'                   # Channel type: awgn, rayleigh, ricean, CDL-A, CDL-C, CDL-E
+channel_type = 'CDL-C'                   # Channel type: awgn, rayleigh, ricean, CDL-A, CDL-C, CDL-E
 quantization_b = np.inf                  # Quantization resolution
 
 Df = 15e3                                # OFDM subcarrier bandwidth [Hz].
@@ -75,7 +75,7 @@ MIMO_estimation = 'perfect'              # Also: perfect, LS, LMMSE (keep at per
 MIMO_equalization = 'MMSE'               # Also: MMSE, ZF
 symbol_detection = 'ML'                  # Also: ML, kmeans, DNN, ensemble
 
-crc_generator = 0b1000_0101              # CRC generator polynomial (n-bit)
+crc_generator = 0b1010_0101              # CRC generator polynomial (n-bit)
 channel_compression_ratio = 0            # Channel compression
 
 K_factor = 4                             # For Ricean
@@ -212,28 +212,33 @@ def generate_transmit_symbols(N_sc, N_t, alphabet, P_TX):
 
     k = int(np.log2(alphabet.shape[0]))
 
-    payload_length = N_sc * N_t * k  # For the future, this depends on the MCS index.
+    max_codeword_length = N_sc * N_t * k  # For the future, this depends on the MCS index.
 
     crc_length = len(bin(crc_generator)[2:])  # in bits.
     crc_pad_length = int(np.ceil(crc_length / k)) * k  # padding included.
     
     # The padding length in symbols is
-    codeword_length = payload_length  # based on the MCS.
-    padding_length_syms = N_sc * N_s - int(np.ceil((codeword_length + crc_length) / k))
-    padding_length_bits = k * padding_length_syms
+    payload_length = max_codeword_length - crc_pad_length
+    padding_length_bits = max_codeword_length - payload_length
+    padding_length_syms = int(np.ceil(padding_length_bits / k))
 
     bits = create_bit_payload(payload_length)
 
     bits = bits[:-crc_pad_length]
     crc_transmitter = compute_crc(bits, crc_generator)
 
-    # Construct the payload frame.
-    payload = bits + '0' * padding_length_bits + crc_transmitter
+    # Construct the codeword (frame containing payload and CRC)
+    while True:
+        codeword = bits + '0' * (padding_length_bits - crc_length) + crc_transmitter
+        if (len(codeword) % (N_sc * N_t) == 0):
+            break
+        else:
+            padding_length_bits += 1
+            
     ###
+    assert(len(codeword) == max_codeword_length)
 
-    assert(len(payload) == payload_length)
-
-    x_b_i, x_b_q, x_information, x_symbols = bits_to_baseband(payload, alphabet)
+    x_b_i, x_b_q, x_information, x_symbols = bits_to_baseband(codeword, alphabet)
 
     x_information = np.reshape(x_information, (N_sc, N_t))
     x_symbols = np.reshape(x_symbols, (N_sc, N_t))
@@ -2422,8 +2427,7 @@ plot_performance(df_detailed_results, xlabel='Tx_EbN0_dB', ylabel='BER', semilog
 plot_performance(df_results, xlabel='Tx_EbN0_dB', ylabel='BLER', semilogy=True, filename='BLER')
 plot_pdf(v, text='noise', algorithm='KDE', filename='enhanced_noise')
 ###############################################################################
-
-
+'''
 # CNN-based equalization
 ###############################################################################
 X_test, y_test, y_pred = equalize_rotation_channel_CNN(theta=np.pi/24, SNR_dB=30,
@@ -2478,3 +2482,4 @@ H_est = _estimate_channel_linear_regression(X, y)
 
 estimation_error = _mse(H, H_est)
 print(f'Using linear regression, estimation error is: {estimation_error:.4f}.')
+'''
