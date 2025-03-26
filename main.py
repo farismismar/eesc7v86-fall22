@@ -609,8 +609,8 @@ def _create_awgn_channel(N_sc, N_r, N_t):
 def _create_ricean_channel(N_sc, N_r, N_t, K_factor):
     global np_random
 
-    mu = np.sqrt(K_factor / (1 + K_factor))
-    sigma = np.sqrt(1 / (1 + K_factor))
+    mu = np.sqrt(K_factor / (2 * (1 + K_factor)))
+    sigma = np.sqrt(1 / (2 * (1 + K_factor)))
 
     # H = np_random.normal(loc=mu, scale=sigma, size=(N_sc, N_r, N_t)) + \
     #     1j * np_random.normal(loc=mu, scale=sigma, size=(N_sc, N_r, N_t))
