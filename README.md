@@ -35,7 +35,7 @@ If you use this library (or any code segments thereof) in a scientific publicati
 ## Versioning
 
 | Version        | Date           | Description  |
-| ------------- |:-----------------:| :-----------------------|
+| ------------- |:--------------------:| :-----------------------|
 | 0.1      | 2022-01-02 | First release. |
 | 0.2      | 2023-12-28 | Implementation of Primer release of 2023-12-28. |
 | 0.3      | 2024-01-03 | Major revision and error fixes. |
